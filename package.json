@@ -1,0 +1,12 @@
+{
+  "name": "zheguang-huilang-cocos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cocos Creator 3.8.x portrait WeChat mini game prototype for 折光回廊",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.check.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

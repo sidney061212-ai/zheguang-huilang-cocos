@@ -1,0 +1,621 @@
+import { _decorator, Color, Component, Graphics, Label, Node, Rect, Tween, tween, UITransform, Vec2, Vec3 } from 'cc';
+import { AudioManager } from '../audio/AudioManager';
+import { SoundKeys } from '../audio/SoundKeys';
+import { GameMode } from './GameMode';
+import {
+  BACKGROUND_BOTTOM,
+  BACKGROUND_TOP,
+  DESIGN_HEIGHT,
+  DESIGN_WIDTH,
+  LANDSCAPE_HINT,
+  PLAY_AREA_RECT,
+  PLAY_AREA_TINT,
+  UI_TEXT,
+} from '../core/Constants';
+import { GameState } from '../core/GameState';
+import { LevelConfig, LightSourceConfig, MirrorConfig, ObstacleConfig, PrismConfig, TargetConfig } from '../core/LevelConfig';
+import { RayImpactEvent, SolveResult, SolveWorld, colorToDisplayColor } from '../core/LightTypes';
+import { levels } from '../data/levels';
+import { ClearEffect } from '../effects/ClearEffect';
+import { HitSpark } from '../effects/HitSpark';
+import { DragRotateController } from '../input/DragRotateController';
+import { DraggableOpticObject } from '../objects/DraggableOpticObject';
+import { LightSourceObject } from '../objects/LightSourceObject';
+import { MirrorObject } from '../objects/MirrorObject';
+import { ObstacleObject } from '../objects/ObstacleObject';
+import { PrismObject } from '../objects/PrismObject';
+import { TargetObject } from '../objects/TargetObject';
+import { RayRenderer } from '../optics/RayRenderer';
+import { RaySolver } from '../optics/RaySolver';
+import { CoordinateSystem } from '../utils/CoordinateSystem';
+import { clamp } from '../utils/MathUtils';
+import { SafeArea } from '../utils/SafeArea';
+import { ClearPopup } from '../ui/ClearPopup';
+import { GameHUD } from '../ui/GameHUD';
+import { HomeView } from '../ui/HomeView';
+import { LevelSelectView } from '../ui/LevelSelectView';
+import { SettingsPopup } from '../ui/SettingsPopup';
+
+const { ccclass } = _decorator;
+
+@ccclass('GameApp')
+export class GameApp extends Component {
+  private readonly coordinateSystem = new CoordinateSystem();
+  private readonly gameState = new GameState();
+  private readonly solver = new RaySolver();
+  private readonly audio = new AudioManager(() => this.gameState.sfxEnabled);
+
+  private canvasTransform!: UITransform;
+  private frame!: Node;
+  private backgroundNode!: Node;
+  private landscapeHintNode!: Node;
+
+  private homeView!: HomeView;
+  private levelSelectView!: LevelSelectView;
+  private hud!: GameHUD;
+  private clearPopup!: ClearPopup;
+  private settingsPopup!: SettingsPopup;
+
+  private gameRoot!: Node;
+  private blankTapNode!: Node;
+  private sourceRoot!: Node;
+  private obstacleRoot!: Node;
+  private rayRoot!: Node;
+  private targetRoot!: Node;
+  private opticRoot!: Node;
+  private effectRoot!: Node;
+
+  private rayRenderer!: RayRenderer;
+  private dragRotateController: DragRotateController | null = null;
+
+  private currentMode = GameMode.Home;
+  private currentLevelIndex = 0;
+  private currentLevel: LevelConfig | null = null;
+  private levelStartedAt = 0;
+  private clearShowing = false;
+
+  private sourceObjects: LightSourceObject[] = [];
+  private mirrorObjects: MirrorObject[] = [];
+  private prismObjects: PrismObject[] = [];
+  private targetObjects = new Map<string, TargetObject>();
+  private obstacleObjects: ObstacleObject[] = [];
+  private previousTargetHits: Record<string, boolean> = {};
+  private previousImpactKeys = new Set<string>();
+  private impactCooldowns = new Map<string, number>();
+
+  private lastCanvasKey = '';
+
+  start() {
+    this.canvasTransform = this.node.getComponent(UITransform)!;
+    this.frame = this.createLayerNode('Frame', this.node);
+    this.frame.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
+
+    this.buildBackground();
+    this.buildGameRoot();
+    this.buildViews();
+    this.buildLandscapeHint();
+
+    this.syncLayout();
+    this.showHome();
+  }
+
+  update() {
+    const size = this.canvasTransform.contentSize;
+    const nextKey = `${Math.round(size.width)}x${Math.round(size.height)}`;
+    if (nextKey !== this.lastCanvasKey) {
+      this.syncLayout();
+    }
+  }
+
+  onDestroy() {
+    this.dragRotateController?.dispose();
+    this.dragRotateController = null;
+  }
+
+  private buildBackground() {
+    this.backgroundNode = this.createLayerNode('Background', this.frame);
+    const graphics = this.backgroundNode.addComponent(Graphics);
+    graphics.fillColor = BACKGROUND_TOP;
+    graphics.roundRect(-DESIGN_WIDTH * 0.5, -DESIGN_HEIGHT * 0.5, DESIGN_WIDTH, DESIGN_HEIGHT, 40);
+    graphics.fill();
+    graphics.fillColor = new Color(BACKGROUND_BOTTOM.r, BACKGROUND_BOTTOM.g, BACKGROUND_BOTTOM.b, 210);
+    graphics.circle(126, -250, 260);
+    graphics.fill();
+    graphics.fillColor = new Color(255, 255, 255, 98);
+    graphics.circle(-124, 250, 178);
+    graphics.fill();
+    graphics.fillColor = new Color(210, 232, 255, 88);
+    graphics.circle(142, 198, 132);
+    graphics.fill();
+    graphics.fillColor = new Color(255, 255, 255, 42);
+    graphics.roundRect(-176, -382, 352, 764, 36);
+    graphics.fill();
+
+    this.createAmbientBeam(new Vec3(-126, 234, 0), 18, 240, new Color(148, 205, 255, 34), new Color(255, 255, 255, 158), 18);
+    this.createAmbientBeam(new Vec3(118, -38, 0), -24, 210, new Color(171, 214, 255, 28), new Color(255, 255, 255, 132), 22);
+    this.createAmbientBeam(new Vec3(-30, -280, 0), 8, 186, new Color(201, 229, 255, 22), new Color(255, 255, 255, 108), 24);
+  }
+
+  private buildGameRoot() {
+    this.gameRoot = this.createLayerNode('GameRoot', this.frame);
+    this.gameRoot.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
+    this.gameRoot.active = false;
+
+    const playAreaNode = this.createLayerNode('PlayArea', this.gameRoot);
+    const playAreaGraphics = playAreaNode.addComponent(Graphics);
+    const left = PLAY_AREA_RECT.x - DESIGN_WIDTH * 0.5;
+    const bottom = PLAY_AREA_RECT.y - DESIGN_HEIGHT * 0.5;
+    playAreaGraphics.fillColor = PLAY_AREA_TINT;
+    playAreaGraphics.roundRect(left, bottom, PLAY_AREA_RECT.width, PLAY_AREA_RECT.height, 34);
+    playAreaGraphics.fill();
+    playAreaGraphics.strokeColor = new Color(255, 255, 255, 158);
+    playAreaGraphics.lineWidth = 2;
+    playAreaGraphics.roundRect(left, bottom, PLAY_AREA_RECT.width, PLAY_AREA_RECT.height, 34);
+    playAreaGraphics.stroke();
+    playAreaGraphics.strokeColor = new Color(177, 206, 244, 56);
+    playAreaGraphics.lineWidth = 1;
+    for (let i = 1; i <= 3; i += 1) {
+      const y = bottom + (PLAY_AREA_RECT.height / 4) * i;
+      playAreaGraphics.moveTo(left + 24, y);
+      playAreaGraphics.lineTo(left + PLAY_AREA_RECT.width - 24, y);
+      playAreaGraphics.stroke();
+    }
+    for (let i = 1; i <= 2; i += 1) {
+      const x = left + (PLAY_AREA_RECT.width / 3) * i;
+      playAreaGraphics.moveTo(x, bottom + 24);
+      playAreaGraphics.lineTo(x, bottom + PLAY_AREA_RECT.height - 24);
+      playAreaGraphics.stroke();
+    }
+
+    this.blankTapNode = this.createLayerNode('BlankTapNode', this.gameRoot);
+    this.blankTapNode.addComponent(UITransform).setContentSize(PLAY_AREA_RECT.width, PLAY_AREA_RECT.height);
+    this.blankTapNode.setPosition(
+      PLAY_AREA_RECT.x + PLAY_AREA_RECT.width * 0.5 - DESIGN_WIDTH * 0.5,
+      PLAY_AREA_RECT.y + PLAY_AREA_RECT.height * 0.5 - DESIGN_HEIGHT * 0.5,
+      0,
+    );
+    this.blankTapNode.on(Node.EventType.TOUCH_START, () => {});
+
+    this.rayRoot = this.createLayerNode('RayRoot', this.gameRoot);
+    this.obstacleRoot = this.createLayerNode('ObstacleRoot', this.gameRoot);
+    this.targetRoot = this.createLayerNode('TargetRoot', this.gameRoot);
+    this.sourceRoot = this.createLayerNode('SourceRoot', this.gameRoot);
+    this.opticRoot = this.createLayerNode('OpticRoot', this.gameRoot);
+    this.effectRoot = this.createLayerNode('EffectRoot', this.gameRoot);
+    this.rayRenderer = new RayRenderer(this.rayRoot);
+  }
+
+  private buildViews() {
+    const layer = this.node.layer;
+    this.homeView = new HomeView(layer, {
+      onStart: () => this.handleUiClick(() => this.enterLevel(this.getRecommendedLevelIndex())),
+      onLevels: () => this.handleUiClick(() => this.showLevelSelect()),
+      onSettings: () => this.handleUiClick(() => this.openSettings()),
+    });
+    this.homeView.node.parent = this.frame;
+
+    this.levelSelectView = new LevelSelectView(layer, {
+      onBack: () => this.handleUiClick(() => this.showHome()),
+      onSelectLevel: (index) => this.handleUiClick(() => this.enterLevel(index)),
+    });
+    this.levelSelectView.node.parent = this.frame;
+    this.levelSelectView.setVisible(false);
+
+    this.hud = new GameHUD(layer, {
+      onBack: () => this.handleUiClick(() => this.showLevelSelect()),
+      onReset: () => this.handleUiClick(() => this.resetCurrentLevel()),
+      onSettings: () => this.handleUiClick(() => this.openSettings()),
+    });
+    this.hud.node.parent = this.gameRoot;
+
+    this.clearPopup = new ClearPopup(layer, {
+      onNext: () => this.handleUiClick(() => this.advanceLevel()),
+      onReplay: () => this.handleUiClick(() => this.resetCurrentLevel()),
+      onLevelSelect: () => this.handleUiClick(() => this.showLevelSelect()),
+    });
+    this.clearPopup.node.parent = this.frame;
+
+    this.settingsPopup = new SettingsPopup(layer, {
+      onToggleSfx: () => this.handleUiClick(() => {
+        this.gameState.setSfxEnabled(!this.gameState.sfxEnabled);
+        this.settingsPopup.refresh(this.gameState.sfxEnabled, this.gameState.vibrationEnabled);
+      }),
+      onToggleVibration: () => this.handleUiClick(() => {
+        this.gameState.setVibrationEnabled(!this.gameState.vibrationEnabled);
+        this.settingsPopup.refresh(this.gameState.sfxEnabled, this.gameState.vibrationEnabled);
+      }),
+      onClose: () => this.handleUiClick(() => this.closeSettings()),
+    });
+    this.settingsPopup.node.parent = this.frame;
+  }
+
+  private buildLandscapeHint() {
+    this.landscapeHintNode = this.createLayerNode('LandscapeHint', this.node);
+    this.landscapeHintNode.addComponent(UITransform).setContentSize(320, 64);
+    const label = this.landscapeHintNode.addComponent(Label);
+    label.string = LANDSCAPE_HINT;
+    label.fontSize = 28;
+    label.lineHeight = 36;
+    label.color = UI_TEXT;
+    label.horizontalAlign = Label.HorizontalAlign.CENTER;
+    label.verticalAlign = Label.VerticalAlign.CENTER;
+    this.landscapeHintNode.active = false;
+  }
+
+  private syncLayout() {
+    const scale = this.coordinateSystem.applyToFrame(this.frame, this.canvasTransform);
+    const insets = SafeArea.createInsets(scale);
+    this.frame.setPosition(0, (insets.bottom - insets.top) * 0.12, 0);
+
+    const landscape = this.coordinateSystem.isLandscape();
+    this.frame.active = !landscape;
+    this.landscapeHintNode.active = landscape;
+    this.landscapeHintNode.setPosition(0, 0, 0);
+    this.lastCanvasKey = `${Math.round(this.canvasTransform.contentSize.width)}x${Math.round(this.canvasTransform.contentSize.height)}`;
+  }
+
+  private showHome() {
+    this.currentMode = GameMode.Home;
+    this.homeView.setVisible(true);
+    this.levelSelectView.setVisible(false);
+    this.gameRoot.active = false;
+    this.clearShowing = false;
+    this.clearPopup.hide();
+    this.closeSettings();
+    this.dragRotateController?.clearSelection();
+  }
+
+  private showLevelSelect() {
+    this.currentMode = GameMode.LevelSelect;
+    this.levelSelectView.refresh(
+      levels,
+      this.gameState.getClearedIds(),
+      this.getRecommendedLevelIndex(),
+      this.currentLevel ? this.currentLevelIndex : -1,
+    );
+    this.homeView.setVisible(false);
+    this.levelSelectView.setVisible(true);
+    this.gameRoot.active = false;
+    this.clearShowing = false;
+    this.clearPopup.hide();
+    this.closeSettings();
+    this.dragRotateController?.clearSelection();
+  }
+
+  private enterLevel(index: number) {
+    const safeIndex = clamp(index, 0, levels.length - 1);
+    this.currentMode = GameMode.Game;
+    this.currentLevelIndex = safeIndex;
+    this.homeView.setVisible(false);
+    this.levelSelectView.setVisible(false);
+    this.gameRoot.active = true;
+    this.clearShowing = false;
+    this.clearPopup.hide();
+    this.closeSettings();
+    this.loadLevel(levels[safeIndex]);
+  }
+
+  private loadLevel(level: LevelConfig) {
+    this.currentLevel = level;
+    this.levelStartedAt = Date.now();
+    this.previousTargetHits = {};
+    this.previousImpactKeys.clear();
+    this.impactCooldowns.clear();
+
+    this.dragRotateController?.dispose();
+    this.dragRotateController = null;
+    this.clearLayer(this.sourceRoot);
+    this.clearLayer(this.obstacleRoot);
+    this.clearLayer(this.targetRoot);
+    this.clearLayer(this.opticRoot);
+    this.clearLayer(this.effectRoot);
+    this.rayRenderer.clear();
+
+    this.sourceObjects = [];
+    this.mirrorObjects = [];
+    this.prismObjects = [];
+    this.targetObjects.clear();
+    this.obstacleObjects = [];
+
+    level.sources.forEach((source) => this.sourceObjects.push(this.createSource(source)));
+    level.obstacles.forEach((obstacle) => this.obstacleObjects.push(this.createObstacle(obstacle)));
+    level.targets.forEach((target) => this.targetObjects.set(target.id, this.createTarget(target)));
+    level.mirrors.forEach((mirror) => this.mirrorObjects.push(this.createMirror(mirror)));
+    level.prisms.forEach((prism) => this.prismObjects.push(this.createPrism(prism)));
+
+    this.dragRotateController = new DragRotateController(
+      this.frame,
+      this.blankTapNode,
+      new Rect(PLAY_AREA_RECT.x, PLAY_AREA_RECT.y, PLAY_AREA_RECT.width, PLAY_AREA_RECT.height),
+      this.audio,
+      {
+        onSelectionChanged: (object) => this.onSelectionChanged(object),
+        onWorldChanged: () => this.recalculateWorld(),
+      },
+    );
+    [...this.mirrorObjects, ...this.prismObjects].forEach((object) => this.dragRotateController?.register(object));
+
+    this.hud.setLevelTitle(level.name);
+    this.hud.setSelectionInfo('未选择装置');
+    this.hud.setHint(level.hint);
+    this.recalculateWorld();
+  }
+
+  private resetCurrentLevel() {
+    if (!this.currentLevel) {
+      return;
+    }
+    this.enterLevel(this.currentLevelIndex);
+  }
+
+  private advanceLevel() {
+    if (this.currentLevelIndex >= levels.length - 1) {
+      this.showLevelSelect();
+      return;
+    }
+    this.enterLevel(this.currentLevelIndex + 1);
+  }
+
+  private openSettings() {
+    this.settingsPopup.refresh(this.gameState.sfxEnabled, this.gameState.vibrationEnabled);
+    this.settingsPopup.show();
+  }
+
+  private closeSettings() {
+    this.settingsPopup.hide();
+  }
+
+  private onSelectionChanged(object: DraggableOpticObject | null) {
+    if (!object) {
+      this.hud.setSelectionInfo('未选择装置');
+      this.hud.setHint(this.currentLevel?.hint ?? '拖动移动，沿外环旋转。');
+      return;
+    }
+    this.hud.setSelectionInfo(object.describeSelection());
+    this.hud.setHint('拖动移动，沿外环旋转，光路会实时重算。');
+  }
+
+  private recalculateWorld() {
+    if (!this.currentLevel) {
+      return;
+    }
+
+    const result = this.solver.solve(this.buildSolveWorld(this.currentLevel));
+    this.rayRenderer.render(result);
+    this.applyTargetState(result);
+    this.applyImpactFeedback(result);
+
+    const requiredTargets = this.currentLevel.targets.filter((target) => target.required);
+    const hitCount = requiredTargets.filter((target) => result.targetHits[target.id]?.hit).length;
+    const energyPercent = this.computeEnergyPercent(requiredTargets, result);
+    this.hud.setTargetSummary(hitCount, requiredTargets.length, energyPercent);
+
+    if (result.cleared && !this.clearShowing) {
+      this.handleLevelClear(energyPercent, result);
+    }
+  }
+
+  private handleLevelClear(energyPercent: number, _result: SolveResult) {
+    if (!this.currentLevel) {
+      return;
+    }
+    this.clearShowing = true;
+    this.gameState.markCleared(this.currentLevel.id);
+    this.audio.play(SoundKeys.LevelClear);
+
+    this.targetObjects.forEach((target) => {
+      const snapshot = target.toSnapshot();
+      const local = this.toLocal(snapshot.position);
+      ClearEffect.play(this.effectRoot, local.x, local.y, snapshot.radius + 54);
+    });
+    ClearEffect.play(this.effectRoot, 0, 0, 168);
+
+    const elapsedSeconds = (Date.now() - this.levelStartedAt) / 1000;
+    const stars = elapsedSeconds <= 14 ? 3 : elapsedSeconds <= 28 ? 2 : 1;
+    this.clearPopup.show({
+      timeSeconds: elapsedSeconds,
+      energyPercent,
+      stars,
+      hasNext: this.currentLevelIndex < levels.length - 1,
+    });
+
+  }
+
+  private applyTargetState(result: SolveResult) {
+    this.targetObjects.forEach((targetObject, id) => {
+      const hit = result.targetHits[id]?.hit ?? false;
+      targetObject.setHit(hit);
+      if (hit && !this.previousTargetHits[id]) {
+        const snapshot = targetObject.toSnapshot();
+        const local = this.toLocal(snapshot.position);
+        const color = colorToDisplayColor(snapshot.acceptedColors[0] ?? 'white');
+        HitSpark.spawn(this.effectRoot, local.x, local.y, color, snapshot.radius + 10);
+        this.audio.play(SoundKeys.TargetCharge);
+        this.audio.play(SoundKeys.RayHitTarget);
+      }
+      this.previousTargetHits[id] = hit;
+    });
+  }
+
+  private applyImpactFeedback(result: SolveResult) {
+    const newKeys = new Set<string>();
+    const watchTypes: Array<RayImpactEvent['type']> = ['mirror', 'prism'];
+    watchTypes.forEach((type) => {
+      const impact = result.impacts.find((item) => item.type === type);
+      if (!impact) {
+        return;
+      }
+      const key = `${type}:${impact.objectId}:${impact.color}`;
+      newKeys.add(key);
+      const now = Date.now();
+      const cooldown = this.impactCooldowns.get(type) ?? 0;
+      if (!this.previousImpactKeys.has(key) && now >= cooldown) {
+        const local = this.toLocal(impact.point);
+        HitSpark.spawn(this.effectRoot, local.x, local.y, colorToDisplayColor(impact.color), type === 'mirror' ? 10 : 14);
+        this.audio.play(type === 'mirror' ? SoundKeys.RayHitMirror : SoundKeys.RayHitPrism);
+        this.impactCooldowns.set(type, now + 220);
+      }
+    });
+    this.previousImpactKeys = newKeys;
+  }
+
+  private computeEnergyPercent(targets: TargetConfig[], result: SolveResult) {
+    if (!targets.length) {
+      return 100;
+    }
+    const total = targets.reduce((sum, target) => {
+      const ratio = (result.targetHits[target.id]?.intensity ?? 0) / Math.max(target.requiredIntensity, 0.001);
+      return sum + clamp(ratio, 0, 1);
+    }, 0);
+    return Math.round((total / targets.length) * 100);
+  }
+
+  private buildSolveWorld(level: LevelConfig): SolveWorld {
+    return {
+      bounds: {
+        x: PLAY_AREA_RECT.x,
+        y: PLAY_AREA_RECT.y,
+        width: PLAY_AREA_RECT.width,
+        height: PLAY_AREA_RECT.height,
+      },
+      rules: level.rules,
+      sources: this.sourceObjects.map((source) => source.toSnapshot()),
+      mirrors: this.mirrorObjects.map((mirror) => mirror.toSnapshot()),
+      prisms: this.prismObjects.map((prism) => prism.toSnapshot()),
+      targets: [...this.targetObjects.values()].map((target) => target.toSnapshot()),
+      obstacles: this.obstacleObjects.map((obstacle) => obstacle.toSnapshot()),
+    };
+  }
+
+  private createSource(source: LightSourceConfig) {
+    const node = this.createLayerNode(`Source:${source.id}`, this.sourceRoot);
+    const component = node.addComponent(LightSourceObject);
+    component.setup({
+      id: source.id,
+      position: new Vec2(source.x, source.y),
+      angle: source.angle,
+      color: source.color,
+      intensity: source.intensity,
+      beamWidth: source.beamWidth,
+    });
+    return component;
+  }
+
+  private createMirror(mirror: MirrorConfig) {
+    const node = this.createLayerNode(`Mirror:${mirror.id}`, this.opticRoot);
+    const component = node.addComponent(MirrorObject);
+    component.setup(
+      {
+        id: mirror.id,
+        position: new Vec2(mirror.x, mirror.y),
+        angle: mirror.angle,
+        length: mirror.length,
+        reflectivity: mirror.reflectivity,
+      },
+      {
+        movable: mirror.movable,
+        rotatable: mirror.rotatable,
+      },
+    );
+    return component;
+  }
+
+  private createPrism(prism: PrismConfig) {
+    const node = this.createLayerNode(`Prism:${prism.id}`, this.opticRoot);
+    const component = node.addComponent(PrismObject);
+    component.setup(
+      {
+        id: prism.id,
+        position: new Vec2(prism.x, prism.y),
+        angle: prism.angle,
+        size: prism.size,
+        dispersion: prism.dispersion,
+      },
+      {
+        movable: prism.movable,
+        rotatable: prism.rotatable,
+      },
+    );
+    return component;
+  }
+
+  private createTarget(target: TargetConfig) {
+    const node = this.createLayerNode(`Target:${target.id}`, this.targetRoot);
+    const component = node.addComponent(TargetObject);
+    component.setup({
+      id: target.id,
+      position: new Vec2(target.x, target.y),
+      radius: target.radius,
+      acceptedColors: target.acceptedColors,
+      requiredIntensity: target.requiredIntensity,
+      required: target.required,
+    });
+    return component;
+  }
+
+  private createObstacle(obstacle: ObstacleConfig) {
+    const node = this.createLayerNode(`Obstacle:${obstacle.id}`, this.obstacleRoot);
+    const component = node.addComponent(ObstacleObject);
+    component.setup({
+      id: obstacle.id,
+      position: new Vec2(obstacle.x, obstacle.y),
+      width: obstacle.width,
+      height: obstacle.height,
+    });
+    return component;
+  }
+
+  private createAmbientBeam(position: Vec3, rotation: number, length: number, glow: Color, core: Color, duration: number) {
+    const node = this.createLayerNode('AmbientBeam', this.backgroundNode);
+    node.setPosition(position);
+    node.setRotationFromEuler(0, 0, rotation);
+
+    const graphics = node.addComponent(Graphics);
+    graphics.lineCap = Graphics.LineCap.ROUND;
+    graphics.lineJoin = Graphics.LineJoin.ROUND;
+    graphics.lineWidth = 22;
+    graphics.strokeColor = glow;
+    graphics.moveTo(-length * 0.5, 0);
+    graphics.lineTo(length * 0.5, 0);
+    graphics.stroke();
+    graphics.lineWidth = 7;
+    graphics.strokeColor = core;
+    graphics.moveTo(-length * 0.5, 0);
+    graphics.lineTo(length * 0.5, 0);
+    graphics.stroke();
+
+    Tween.stopAllByTarget(node);
+    tween(node)
+      .repeatForever(
+        tween(node)
+          .to(duration, { position: position.clone().add(new Vec3(18, 8, 0)) })
+          .to(duration, { position: position.clone().add(new Vec3(-14, -6, 0)) }),
+      )
+      .start();
+  }
+
+  private getRecommendedLevelIndex() {
+    const firstUncleared = levels.findIndex((level) => !this.gameState.isCleared(level.id));
+    return firstUncleared >= 0 ? firstUncleared : levels.length - 1;
+  }
+
+  private handleUiClick(action: () => void) {
+    this.audio.play(SoundKeys.UiClick);
+    action();
+  }
+
+  private createLayerNode(name: string, parent: Node) {
+    const node = new Node(name);
+    node.parent = parent;
+    node.layer = this.node.layer;
+    return node;
+  }
+
+  private clearLayer(node: Node) {
+    [...node.children].forEach((child) => child.destroy());
+  }
+
+  private toLocal(point: Vec2) {
+    return new Vec3(point.x - DESIGN_WIDTH * 0.5, point.y - DESIGN_HEIGHT * 0.5, 0);
+  }
+}

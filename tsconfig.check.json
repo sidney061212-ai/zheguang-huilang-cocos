@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [],
+    "typeRoots": [
+      "./types",
+      "./node_modules/@types"
+    ]
+  },
+  "include": [
+    "assets/scripts/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "zheguang-huilang-cocos",
+  "version": "0.1.0",
+  "engineVersion": "3.8.8",
+  "designResolution": {
+    "width": 390,
+    "height": 844
+  },
+  "orientation": "portrait",
+  "platform": "wechatgame"
+}

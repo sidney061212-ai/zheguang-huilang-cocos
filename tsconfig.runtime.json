@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "baseUrl": ".",
+    "strict": false,
+    "skipLibCheck": true,
+    "outDir": ".tmp-ts",
+    "typeRoots": ["./types", "./node_modules/@types"]
+  },
+  "include": [
+    "assets/scripts/core/**/*.ts",
+    "assets/scripts/data/**/*.ts",
+    "assets/scripts/optics/**/*.ts",
+    "assets/scripts/utils/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}
