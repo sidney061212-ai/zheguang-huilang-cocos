@@ -21,19 +21,20 @@ export class GameHUD {
     this.node.layer = layer;
     this.node.addComponent(UITransform).setContentSize(390, 844);
 
-    const top = createGlassPanelNode('TopPanel', layer, 350, 76, {
-      radius: 28,
-      fillColor: new Color(255, 255, 255, 124),
-      glowColor: new Color(189, 218, 255, 36),
+    const top = createGlassPanelNode('TopPanel', layer, 356, 80, {
+      radius: 30,
+      fillColor: new Color(18, 35, 60, 192),
+      strokeColor: new Color(188, 220, 255, 124),
+      glowColor: new Color(120, 178, 255, 52),
     });
     top.node.parent = this.node;
-    top.node.setPosition(0, 370, 0);
+    top.node.setPosition(0, 364, 0);
 
     const backButton = createGlassButton('HudBack', layer, {
-      text: '‹',
-      width: 52,
+      text: '返回',
+      width: 64,
       height: 48,
-      fontSize: 28,
+      fontSize: 14,
       variant: 'ghost',
       onTap: callbacks.onBack,
     });
@@ -42,18 +43,18 @@ export class GameHUD {
 
     const resetButton = createGlassButton('HudReset', layer, {
       text: '重置',
-      width: 66,
+      width: 70,
       height: 44,
       fontSize: 14,
       variant: 'secondary',
       onTap: callbacks.onReset,
     });
     resetButton.node.parent = top.node;
-    resetButton.node.setPosition(90, 0, 0);
+    resetButton.node.setPosition(96, 0, 0);
 
     const settingsButton = createGlassButton('HudSettings', layer, {
       text: '设置',
-      width: 58,
+      width: 62,
       height: 44,
       fontSize: 13,
       variant: 'ghost',
@@ -62,19 +63,20 @@ export class GameHUD {
     settingsButton.node.parent = top.node;
     settingsButton.node.setPosition(146, 0, 0);
 
-    this.titleLabel = makeLabel(top.node, layer, '镜面初识', 20, UI_TEXT, new Vec3(0, 12, 0), 180, 28, 'center');
-    this.statusLabel = makeLabel(top.node, layer, '目标 0/1 · 光能 0%', 13, UI_SUBTEXT, new Vec3(0, -18, 0), 180, 20, 'center');
+    this.titleLabel = makeLabel(top.node, layer, '镜面初识', 21, UI_TEXT, new Vec3(0, 12, 0), 180, 30, 'center');
+    this.statusLabel = makeLabel(top.node, layer, '目标 0/1 · 光能 0%', 13, UI_SUBTEXT, new Vec3(0, -16, 0), 190, 22, 'center');
 
-    const bottom = createGlassPanelNode('BottomPanel', layer, 350, 108, {
-      radius: 30,
-      fillColor: new Color(255, 255, 255, 126),
-      glowColor: new Color(188, 215, 255, 32),
+    const info = createGlassPanelNode('InfoPanel', layer, 356, 84, {
+      radius: 28,
+      fillColor: new Color(18, 34, 58, 166),
+      strokeColor: new Color(174, 208, 245, 116),
+      glowColor: new Color(112, 172, 255, 38),
     });
-    bottom.node.parent = this.node;
-    bottom.node.setPosition(0, -356, 0);
+    info.node.parent = this.node;
+    info.node.setPosition(0, -250, 0);
 
-    this.selectionLabel = makeLabel(bottom.node, layer, '未选择装置', 16, UI_TEXT, new Vec3(0, 18, 0), 290, 24, 'center');
-    this.hintLabel = makeLabel(bottom.node, layer, '拖动移动，沿外环旋转，光路会实时更新。', 13, UI_SUBTEXT, new Vec3(0, -16, 0), 298, 38, 'center');
+    this.selectionLabel = makeLabel(info.node, layer, '未选择道具', 15, UI_TEXT, new Vec3(0, 16, 0), 304, 22, 'center');
+    this.hintLabel = makeLabel(info.node, layer, '从下方道具栏拖入，再用手指外圈拖动调整角度。', 12, UI_SUBTEXT, new Vec3(0, -12, 0), 308, 34, 'center');
     this.hintLabel.enableWrapText = true;
   }
 

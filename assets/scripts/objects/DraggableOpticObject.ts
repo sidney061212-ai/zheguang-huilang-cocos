@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, Graphics, Node, tween, UITransform, Vec2, Vec3 } from 'cc';
+import { _decorator, Color, Component, Graphics, Label, Node, tween, UITransform, Vec2, Vec3 } from 'cc';
 import { ANGLE_SNAP_DEGREES, DESIGN_HEIGHT, DESIGN_WIDTH, DRAG_SCALE, INVALID_TINT, PANEL_BORDER, UI_SUBTEXT } from '../core/Constants';
 import { snapAngle } from '../utils/MathUtils';
 
@@ -18,6 +18,9 @@ export abstract class DraggableOpticObject extends Component {
   protected interactionMode: InteractionMode = 'idle';
   protected readonly graphics!: Graphics;
   protected readonly uiTransform!: UITransform;
+  private angleLabelNode: Node | null = null;
+  private inInventory = false;
+  private inventoryAnchor = new Vec2();
 
   onLoad() {
     this.node.layer = 33554432;
@@ -113,7 +116,7 @@ export abstract class DraggableOpticObject extends Component {
     const dist = local.length();
     const ringOuter = this.getTouchRadius() + 22;
     const ringInner = this.getTouchRadius() - 2;
-    if (this.rotatable && this.selected && dist >= ringInner && dist <= ringOuter) {
+    if (this.rotatable && this.selected && this.supportsRingRotation() && dist >= ringInner && dist <= ringOuter) {
       return 'rotate';
     }
     if (this.movable && dist <= this.getTouchRadius() + 12) {
@@ -130,6 +133,22 @@ export abstract class DraggableOpticObject extends Component {
     return `${this.getDisplayName()}  角度 ${Math.round(this.angle)}°`;
   }
 
+  setInventoryState(inInventory: boolean, anchor?: Vec2) {
+    this.inInventory = inInventory;
+    if (anchor) {
+      this.inventoryAnchor = anchor.clone();
+    }
+    this.refreshVisual();
+  }
+
+  isInInventory() {
+    return this.inInventory;
+  }
+
+  getInventoryAnchor() {
+    return this.inventoryAnchor.clone();
+  }
+
   protected refreshVisual() {
     const graphics = this.node.getComponent(Graphics)!;
     graphics.clear();
@@ -141,11 +160,20 @@ export abstract class DraggableOpticObject extends Component {
       graphics.stroke();
     }
     if (this.rotatable && this.selected) {
-      graphics.lineWidth = 5;
-      graphics.strokeColor = new Color(UI_SUBTEXT.r, UI_SUBTEXT.g, UI_SUBTEXT.b, 80);
-      graphics.arc(0, 0, this.getTouchRadius() + 22, 0.1, Math.PI * 1.65, false);
+      const handleRadius = this.getTouchRadius() + 22;
+      graphics.lineWidth = 3;
+      graphics.strokeColor = new Color(UI_SUBTEXT.r, UI_SUBTEXT.g, UI_SUBTEXT.b, 88);
+      graphics.circle(0, 0, handleRadius);
       graphics.stroke();
+      graphics.lineWidth = 2;
+      graphics.moveTo(this.getTouchRadius() + 6, 0);
+      graphics.lineTo(handleRadius - 8, 0);
+      graphics.stroke();
+      graphics.fillColor = new Color(255, 255, 255, 232);
+      graphics.circle(handleRadius, 0, 7);
+      graphics.fill();
     }
+    this.refreshAngleLabel();
   }
 
   protected getTintColor() {
@@ -153,6 +181,39 @@ export abstract class DraggableOpticObject extends Component {
       return INVALID_TINT;
     }
     return this.selected ? PANEL_BORDER : new Color(255, 255, 255, 255);
+  }
+
+  private refreshAngleLabel() {
+    const labelNode = this.ensureAngleLabel();
+    labelNode.active = this.selected;
+    if (!this.selected) {
+      return;
+    }
+    labelNode.setPosition(0, this.getTouchRadius() + 34, 0);
+    labelNode.setRotationFromEuler(0, 0, -this.angle);
+    const label = labelNode.getComponent(Label)!;
+    label.string = `${Math.round(this.angle)}°`;
+    label.color = this.interactionMode === 'invalid' ? INVALID_TINT : UI_SUBTEXT;
+  }
+
+  private ensureAngleLabel() {
+    if (!this.angleLabelNode) {
+      this.angleLabelNode = new Node('AngleLabel');
+      this.angleLabelNode.parent = this.node;
+      this.angleLabelNode.layer = this.node.layer;
+      this.angleLabelNode.addComponent(UITransform).setContentSize(88, 26);
+      const label = this.angleLabelNode.addComponent(Label);
+      label.fontSize = 14;
+      label.lineHeight = 18;
+      label.horizontalAlign = Label.HorizontalAlign.CENTER;
+      label.verticalAlign = Label.VerticalAlign.CENTER;
+    }
+    this.angleLabelNode.layer = this.node.layer;
+    return this.angleLabelNode;
+  }
+
+  protected supportsRingRotation() {
+    return true;
   }
 
   abstract getTouchRadius(): number;

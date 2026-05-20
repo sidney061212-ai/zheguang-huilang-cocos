@@ -41,17 +41,17 @@ export class MirrorObject extends DraggableOpticObject {
 
   protected drawVisual(graphics: Graphics) {
     const tint = this.getTintColor();
-    graphics.lineWidth = 13;
-    graphics.strokeColor = new Color(130, 175, 234, tint.a);
+    graphics.lineWidth = 14;
+    graphics.strokeColor = new Color(88, 140, 206, tint.a);
     graphics.moveTo(-this.length * 0.5, 0);
     graphics.lineTo(this.length * 0.5, 0);
     graphics.stroke();
     graphics.lineWidth = 6;
-    graphics.strokeColor = new Color(255, 255, 255, tint.a);
+    graphics.strokeColor = new Color(234, 245, 255, tint.a);
     graphics.moveTo(-this.length * 0.5, 0);
     graphics.lineTo(this.length * 0.5, 0);
     graphics.stroke();
-    graphics.fillColor = new Color(255, 255, 255, tint.a);
+    graphics.fillColor = new Color(226, 240, 255, tint.a);
     graphics.circle(-this.length * 0.5, 0, 5);
     graphics.circle(this.length * 0.5, 0, 5);
     graphics.fill();

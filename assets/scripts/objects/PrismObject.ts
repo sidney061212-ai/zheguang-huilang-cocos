@@ -41,8 +41,8 @@ export class PrismObject extends DraggableOpticObject {
 
   protected drawVisual(graphics: Graphics) {
     const tint = this.getTintColor();
-    graphics.fillColor = new Color(236, 244, 255, Math.min(180, tint.a));
-    graphics.strokeColor = new Color(255, 255, 255, tint.a);
+    graphics.fillColor = new Color(218, 235, 255, Math.min(194, tint.a));
+    graphics.strokeColor = new Color(232, 244, 255, tint.a);
     graphics.lineWidth = 4;
     graphics.moveTo(0, this.size);
     graphics.lineTo(-this.size * 0.866, -this.size * 0.5);
@@ -51,11 +51,11 @@ export class PrismObject extends DraggableOpticObject {
     graphics.fill();
     graphics.stroke();
     graphics.lineWidth = 2;
-    graphics.strokeColor = new Color(255, 144, 158, 135);
+    graphics.strokeColor = new Color(255, 146, 164, 152);
     graphics.moveTo(-this.size * 0.42, -this.size * 0.12);
     graphics.lineTo(this.size * 0.18, this.size * 0.48);
     graphics.stroke();
-    graphics.strokeColor = new Color(116, 190, 255, 135);
+    graphics.strokeColor = new Color(126, 198, 255, 152);
     graphics.moveTo(0, -this.size * 0.36);
     graphics.lineTo(this.size * 0.52, 0.12 * this.size);
     graphics.stroke();

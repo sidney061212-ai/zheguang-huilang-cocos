@@ -1,6 +1,6 @@
 {
   "name": "zheguang-huilang-cocos",
-  "version": "0.1.0",
+  "version": "3.8.8",
   "private": true,
   "description": "Cocos Creator 3.8.x portrait WeChat mini game prototype for 折光回廊",
   "scripts": {
@@ -8,5 +8,9 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
-  }
+  },
+  "creator": {
+    "version": "3.8.8"
+  },
+  "uuid": "db797bff-8a2e-4d33-963f-c1fca337778c"
 }

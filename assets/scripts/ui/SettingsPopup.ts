@@ -25,21 +25,22 @@ export class SettingsPopup {
     dim.layer = layer;
     dim.addComponent(UITransform).setContentSize(390, 844);
     const dimGraphics = dim.addComponent(Graphics);
-    dimGraphics.fillColor = new Color(33, 50, 76, 84);
+    dimGraphics.fillColor = new Color(6, 12, 24, 172);
     dimGraphics.rect(-195, -422, 390, 844);
     dimGraphics.fill();
     dim.on(Node.EventType.TOUCH_END, callbacks.onClose);
 
     const panel = createGlassPanelNode('SettingsPanel', layer, 320, 258, {
       radius: 34,
-      fillColor: new Color(255, 255, 255, 140),
-      glowColor: new Color(192, 221, 255, 36),
+      fillColor: new Color(18, 34, 58, 214),
+      strokeColor: new Color(182, 214, 252, 148),
+      glowColor: new Color(120, 178, 255, 56),
     });
     panel.node.parent = this.node;
     panel.node.setPosition(0, 0, 0);
 
     makeLabel(panel.node, layer, '设置', 28, UI_TEXT, new Vec3(0, 88, 0), 160, 34);
-    makeLabel(panel.node, layer, '声音与震动都可以后续接入真机能力。', 14, UI_SUBTEXT, new Vec3(0, 50, 0), 230, 24);
+    makeLabel(panel.node, layer, '音效与震动开关。', 14, UI_SUBTEXT, new Vec3(0, 50, 0), 230, 24);
 
     this.sfxButton = createGlassButton('SfxButton', layer, {
       text: '音效：开',

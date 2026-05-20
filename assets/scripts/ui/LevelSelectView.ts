@@ -1,4 +1,4 @@
-import { Color, Label, Node, Tween, tween, UITransform, Vec3 } from 'cc';
+import { Color, Graphics, Label, Node, Tween, tween, UITransform, Vec3 } from 'cc';
 import { LevelConfig } from '../core/LevelConfig';
 import { PANEL_BORDER, UI_SUBTEXT, UI_TEXT } from '../core/Constants';
 import { createGlassButton } from './GlassButton';
@@ -15,6 +15,7 @@ interface LevelCardRef {
   numberLabel: Label;
   nameLabel: Label;
   hintLabel: Label;
+  statusNode: Node;
   statusPanel: GlassPanel;
   statusLabel: Label;
 }
@@ -39,8 +40,8 @@ export class LevelSelectView {
     backButton.node.parent = this.node;
     backButton.node.setPosition(-136, 338, 0);
 
-    makeLabel(this.node, layer, '关卡选择', 26, UI_TEXT, new Vec3(0, 336, 0), 180, 34, 'center');
-    makeLabel(this.node, layer, '选择一段回廊，点亮正确的光路。', 14, UI_SUBTEXT, new Vec3(0, 302, 0), 240, 24, 'center');
+    makeLabel(this.node, layer, '选择回廊', 28, UI_TEXT, new Vec3(0, 336, 0), 180, 34, 'center');
+    makeLabel(this.node, layer, '把正确颜色的光送进目标机关。', 14, UI_SUBTEXT, new Vec3(0, 302, 0), 246, 24, 'center');
 
     const layouts = [
       { x: -88, y: 158, width: 154, height: 132 },
@@ -71,43 +72,44 @@ export class LevelSelectView {
       const isCurrent = index === currentIndex;
       const status = isCurrent ? '当前' : isRecommended ? '推荐' : isCleared ? '已通关' : '可玩';
       const panelFill = isCurrent
-        ? new Color(232, 244, 255, 168)
+        ? new Color(29, 55, 90, 228)
         : isRecommended
-          ? new Color(236, 246, 255, 144)
-          : new Color(255, 255, 255, 122);
+          ? new Color(27, 50, 82, 214)
+          : new Color(21, 40, 67, 194);
       const panelStroke = isCurrent
-        ? new Color(97, 162, 255, 230)
+        ? new Color(146, 201, 255, 230)
         : isRecommended
-          ? new Color(142, 192, 255, 214)
+          ? new Color(127, 186, 255, 212)
           : PANEL_BORDER;
 
       card.panel.setup({
         fillColor: panelFill,
         strokeColor: panelStroke,
-        glowColor: isRecommended ? new Color(176, 212, 255, 42) : new Color(255, 255, 255, 26),
+        glowColor: isRecommended ? new Color(126, 184, 255, 58) : new Color(115, 170, 255, 28),
       });
       card.numberLabel.string = `0${index + 1}`;
       card.nameLabel.string = level.name;
       card.hintLabel.string = level.hint;
-      card.statusLabel.string = status;
+      card.statusLabel.string = isCleared ? '✓ 已通关' : status;
       card.statusPanel.setup({
-        width: 62,
+        width: 78,
         height: 28,
         radius: 14,
         fillColor: isCleared
-          ? new Color(214, 245, 230, 180)
+          ? new Color(40, 86, 78, 214)
           : isRecommended || isCurrent
-            ? new Color(220, 238, 255, 188)
-            : new Color(255, 255, 255, 118),
+            ? new Color(32, 66, 104, 212)
+            : new Color(19, 37, 62, 188),
         strokeColor: isCleared
-          ? new Color(124, 206, 158, 220)
+          ? new Color(122, 230, 184, 228)
           : isRecommended || isCurrent
-            ? new Color(112, 180, 255, 220)
-            : new Color(255, 255, 255, 170),
-        shadowColor: new Color(114, 154, 210, 24),
-        highlightColor: new Color(255, 255, 255, 94),
-        glowColor: new Color(255, 255, 255, 18),
+            ? new Color(142, 201, 255, 224)
+            : new Color(168, 206, 248, 164),
+        shadowColor: new Color(9, 16, 30, 102),
+        highlightColor: new Color(224, 241, 255, 112),
+        glowColor: new Color(122, 180, 255, 34),
       });
+      card.statusNode.setPosition(widthByCard(card) * 0.22, heightByCard(card) * 0.22, 0);
     });
   }
 
@@ -124,23 +126,27 @@ export class LevelSelectView {
       width,
       height,
       radius: 28,
+      fillColor: new Color(21, 40, 67, 194),
+      strokeColor: new Color(174, 208, 245, 166),
+      glowColor: new Color(112, 172, 255, 28),
     });
 
     const numberLabel = makeLabel(cardNode, layer, `0${index + 1}`, 30, UI_TEXT, new Vec3(-width * 0.25, height * 0.18, 0), 80, 36, 'left');
-    const nameLabel = makeLabel(cardNode, layer, '关卡', 17, UI_TEXT, new Vec3(-width * 0.25, -4, 0), width - 56, 28, 'left');
-    const hintLabel = makeLabel(cardNode, layer, '提示', 12, UI_SUBTEXT, new Vec3(0, -height * 0.22, 0), width - 38, 40, 'center');
+    const nameLabel = makeLabel(cardNode, layer, '关卡', 18, UI_TEXT, new Vec3(-width * 0.25, -2, 0), width - 56, 28, 'left');
+    const hintLabel = makeLabel(cardNode, layer, '提示', 12, UI_SUBTEXT, new Vec3(0, -height * 0.24, 0), width - 38, 40, 'center');
     hintLabel.enableWrapText = true;
 
-    const statusNode = createGlassPanelNode('Status', layer, 62, 28, {
+    const statusNode = createGlassPanelNode('Status', layer, 78, 28, {
       radius: 14,
-      fillColor: new Color(255, 255, 255, 126),
-      glowColor: new Color(255, 255, 255, 18),
+      fillColor: new Color(19, 37, 62, 188),
+      strokeColor: new Color(168, 206, 248, 164),
+      glowColor: new Color(122, 180, 255, 34),
     });
     statusNode.node.parent = cardNode;
-    statusNode.node.setPosition(width * 0.25, height * 0.22, 0);
-    const statusLabel = makeLabel(statusNode.node, layer, '可玩', 11, UI_SUBTEXT, new Vec3(0, 0, 0), 50, 18, 'center');
+    statusNode.node.setPosition(width * 0.22, height * 0.22, 0);
+    const statusLabel = makeLabel(statusNode.node, layer, '可玩', 10, UI_SUBTEXT, new Vec3(0, 0, 0), 70, 18, 'center');
 
-    bindTap(cardNode, () => onSelect(index));
+    bindTap(cardNode, width, height, () => onSelect(index));
 
     return {
       node: cardNode,
@@ -149,24 +155,38 @@ export class LevelSelectView {
       nameLabel,
       hintLabel,
       statusPanel: statusNode.panel,
+      statusNode: statusNode.node,
       statusLabel,
     };
   }
 }
 
-const bindTap = (node: Node, onTap: () => void) => {
-  node.on(Node.EventType.TOUCH_START, () => {
+const widthByCard = (card: LevelCardRef) => card.node.getComponent(UITransform)?.contentSize.width ?? 154;
+const heightByCard = (card: LevelCardRef) => card.node.getComponent(UITransform)?.contentSize.height ?? 132;
+
+const bindTap = (node: Node, width: number, height: number, onTap: () => void) => {
+  const touchSurface = new Node('TouchSurface');
+  touchSurface.parent = node;
+  touchSurface.layer = node.layer;
+  touchSurface.setSiblingIndex(Number.MAX_SAFE_INTEGER);
+  touchSurface.addComponent(UITransform).setContentSize(width, height);
+  const graphics = touchSurface.addComponent(Graphics);
+  graphics.fillColor = new Color(255, 255, 255, 1);
+  graphics.roundRect(-width * 0.5, -height * 0.5, width, height, 28);
+  graphics.fill();
+
+  touchSurface.on(Node.EventType.TOUCH_START, () => {
     Tween.stopAllByTarget(node);
     tween(node).to(0.08, { scale: new Vec3(0.98, 0.98, 1) }).start();
   });
-  node.on(Node.EventType.TOUCH_END, () => {
+  touchSurface.on(Node.EventType.TOUCH_END, () => {
     Tween.stopAllByTarget(node);
     tween(node)
       .to(0.08, { scale: new Vec3(1, 1, 1) })
       .call(onTap)
       .start();
   });
-  node.on(Node.EventType.TOUCH_CANCEL, () => {
+  touchSurface.on(Node.EventType.TOUCH_CANCEL, () => {
     Tween.stopAllByTarget(node);
     tween(node).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
   });

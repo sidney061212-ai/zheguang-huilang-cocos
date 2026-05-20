@@ -32,7 +32,7 @@ export class ClearPopup {
     dim.layer = layer;
     dim.addComponent(UITransform).setContentSize(390, 844);
     const dimGraphics = dim.addComponent(Graphics);
-    dimGraphics.fillColor = new Color(33, 50, 76, 92);
+    dimGraphics.fillColor = new Color(6, 12, 24, 176);
     dimGraphics.rect(-195, -422, 390, 844);
     dimGraphics.fill();
     dim.on(Node.EventType.TOUCH_START, () => {});
@@ -40,15 +40,16 @@ export class ClearPopup {
 
     const panel = createGlassPanelNode('ClearPanel', layer, 318, 316, {
       radius: 34,
-      fillColor: new Color(255, 255, 255, 138),
-      glowColor: new Color(196, 222, 255, 38),
+      fillColor: new Color(18, 34, 58, 214),
+      strokeColor: new Color(182, 214, 252, 148),
+      glowColor: new Color(120, 178, 255, 58),
     });
     panel.node.parent = this.node;
     panel.node.setPosition(0, 0, 0);
 
-    makeLabel(panel.node, layer, '光路连通', 28, UI_TEXT, new Vec3(0, 104, 0), 220, 34);
-    makeLabel(panel.node, layer, '这一段回廊已经被点亮。', 15, UI_SUBTEXT, new Vec3(0, 66, 0), 230, 24);
-    this.metaLabel = makeLabel(panel.node, layer, '用时 0.0s · 光能 0% · 星级 ★', 15, UI_TEXT, new Vec3(0, 20, 0), 240, 24);
+    makeLabel(panel.node, layer, '光路连通', 30, UI_TEXT, new Vec3(0, 106, 0), 220, 36);
+    makeLabel(panel.node, layer, '回廊已被点亮。', 15, UI_SUBTEXT, new Vec3(0, 68, 0), 230, 24);
+    this.metaLabel = makeLabel(panel.node, layer, '用时 0.0s · 光能 0% · 星级 ★', 15, UI_TEXT, new Vec3(0, 24, 0), 248, 24);
 
     this.nextButton = createGlassButton('NextButton', layer, {
       text: '下一关',
@@ -58,7 +59,7 @@ export class ClearPopup {
       onTap: callbacks.onNext,
     });
     this.nextButton.node.parent = panel.node;
-    this.nextButton.node.setPosition(0, -48, 0);
+    this.nextButton.node.setPosition(0, -44, 0);
 
     const replayButton = createGlassButton('ReplayButton', layer, {
       text: '重玩本关',
@@ -68,7 +69,7 @@ export class ClearPopup {
       onTap: callbacks.onReplay,
     });
     replayButton.node.parent = panel.node;
-    replayButton.node.setPosition(0, -114, 0);
+    replayButton.node.setPosition(0, -110, 0);
 
     const selectButton = createGlassButton('SelectButton', layer, {
       text: '返回选关',
@@ -78,7 +79,7 @@ export class ClearPopup {
       onTap: callbacks.onLevelSelect,
     });
     selectButton.node.parent = panel.node;
-    selectButton.node.setPosition(0, -176, 0);
+    selectButton.node.setPosition(0, -172, 0);
   }
 
   show(payload: ClearPopupPayload) {

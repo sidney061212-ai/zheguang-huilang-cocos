@@ -15,6 +15,10 @@ export interface GlassButtonOptions {
   variant?: GlassButtonVariant;
   enabled?: boolean;
   onTap?: () => void;
+  onHoldTick?: () => void;
+  onPressEnd?: () => void;
+  holdDelayMs?: number;
+  holdIntervalMs?: number;
 }
 
 @ccclass('GlassButton')
@@ -32,6 +36,9 @@ export class GlassButton extends Component {
   private labelNode: Node | null = null;
   private label: Label | null = null;
   private pressed = false;
+  private holdActive = false;
+  private holdTimer: ReturnType<typeof setTimeout> | null = null;
+  private holdInterval: ReturnType<typeof setInterval> | null = null;
 
   onLoad() {
     this.ensureNodes();
@@ -45,6 +52,7 @@ export class GlassButton extends Component {
     this.node.off(Node.EventType.TOUCH_START, this.onTouchStart, this);
     this.node.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
     this.node.off(Node.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
+    this.stopHold();
   }
 
   setup(options: Partial<GlassButtonOptions>) {
@@ -98,7 +106,9 @@ export class GlassButton extends Component {
       return;
     }
     this.pressed = true;
+    this.holdActive = false;
     this.animateScale(0.97);
+    this.startHold();
   }
 
   private onTouchEnd() {
@@ -107,15 +117,21 @@ export class GlassButton extends Component {
     }
     this.pressed = false;
     this.animateScale(1);
+    this.stopHold();
     if (this.options.enabled === false) {
       return;
     }
-    this.options.onTap?.();
+    if (!this.holdActive) {
+      this.options.onTap?.();
+    }
+    this.options.onPressEnd?.();
   }
 
   private onTouchCancel() {
     this.pressed = false;
+    this.stopHold();
     this.animateScale(1);
+    this.options.onPressEnd?.();
   }
 
   private animateScale(target: number) {
@@ -138,34 +154,60 @@ export class GlassButton extends Component {
     this.labelNode.setPosition(0, 0, 0);
     this.label = this.labelNode.getComponent(Label) ?? this.labelNode.addComponent(Label);
   }
+
+  private startHold() {
+    if (!this.options.onHoldTick) {
+      return;
+    }
+    const delay = this.options.holdDelayMs ?? 230;
+    const interval = this.options.holdIntervalMs ?? 92;
+    this.holdTimer = setTimeout(() => {
+      this.holdActive = true;
+      this.options.onHoldTick?.();
+      this.holdInterval = setInterval(() => {
+        this.options.onHoldTick?.();
+      }, interval);
+    }, delay);
+  }
+
+  private stopHold() {
+    if (this.holdTimer) {
+      clearTimeout(this.holdTimer);
+      this.holdTimer = null;
+    }
+    if (this.holdInterval) {
+      clearInterval(this.holdInterval);
+      this.holdInterval = null;
+    }
+  }
 }
 
 const variantStyle = (variant: GlassButtonVariant, enabled: boolean): Partial<GlassPanelOptions> => {
   const disabledAlpha = enabled ? 1 : 0.56;
   if (variant === 'primary') {
     return {
-      fillColor: new Color(74, 145, 255, Math.round(232 * disabledAlpha)),
-      strokeColor: new Color(255, 255, 255, Math.round(138 * disabledAlpha)),
-      shadowColor: new Color(85, 144, 255, Math.round(74 * disabledAlpha)),
-      highlightColor: new Color(255, 255, 255, Math.round(104 * disabledAlpha)),
-      glowColor: new Color(186, 217, 255, Math.round(42 * disabledAlpha)),
+      fillColor: new Color(70, 132, 236, Math.round(228 * disabledAlpha)),
+      strokeColor: new Color(220, 238, 255, Math.round(168 * disabledAlpha)),
+      shadowColor: new Color(18, 40, 76, Math.round(102 * disabledAlpha)),
+      highlightColor: new Color(232, 243, 255, Math.round(120 * disabledAlpha)),
+      glowColor: new Color(132, 187, 255, Math.round(52 * disabledAlpha)),
     };
   }
   if (variant === 'ghost') {
     return {
-      fillColor: new Color(255, 255, 255, Math.round(86 * disabledAlpha)),
-      strokeColor: new Color(PANEL_BORDER.r, PANEL_BORDER.g, PANEL_BORDER.b, Math.round(156 * disabledAlpha)),
-      shadowColor: new Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, Math.round(28 * disabledAlpha)),
-      highlightColor: new Color(255, 255, 255, Math.round(92 * disabledAlpha)),
-      glowColor: new Color(255, 255, 255, Math.round(18 * disabledAlpha)),
+      fillColor: new Color(20, 36, 62, Math.round(154 * disabledAlpha)),
+      strokeColor: new Color(PANEL_BORDER.r, PANEL_BORDER.g, PANEL_BORDER.b, Math.round(132 * disabledAlpha)),
+      shadowColor: new Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, Math.round(88 * disabledAlpha)),
+      highlightColor: new Color(224, 241, 255, Math.round(96 * disabledAlpha)),
+      glowColor: new Color(112, 170, 255, Math.round(36 * disabledAlpha)),
     };
   }
   return {
-    fillColor: new Color(PANEL_FILL.r, PANEL_FILL.g, PANEL_FILL.b, Math.round(138 * disabledAlpha)),
-    strokeColor: new Color(PANEL_BORDER.r, PANEL_BORDER.g, PANEL_BORDER.b, Math.round(188 * disabledAlpha)),
-    shadowColor: new Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, Math.round(42 * disabledAlpha)),
-    highlightColor: new Color(255, 255, 255, Math.round(112 * disabledAlpha)),
-    glowColor: new Color(255, 255, 255, Math.round(28 * disabledAlpha)),
+    fillColor: new Color(PANEL_FILL.r, PANEL_FILL.g, PANEL_FILL.b, Math.round(196 * disabledAlpha)),
+    strokeColor: new Color(PANEL_BORDER.r, PANEL_BORDER.g, PANEL_BORDER.b, Math.round(162 * disabledAlpha)),
+    shadowColor: new Color(PANEL_SHADOW.r, PANEL_SHADOW.g, PANEL_SHADOW.b, Math.round(108 * disabledAlpha)),
+    highlightColor: new Color(230, 244, 255, Math.round(110 * disabledAlpha)),
+    glowColor: new Color(112, 172, 255, Math.round(34 * disabledAlpha)),
   };
 };
 

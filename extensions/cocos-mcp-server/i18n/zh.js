@@ -1,0 +1,31 @@
+"use strict";
+
+module.exports = {
+    "extension_name": "Cocos MCP 服务器",
+    "description": "适用于 Cocos Creator 3.8 的 AI MCP 服务器",
+    "panel_title": "MCP 服务器",
+    "open_panel": "打开 MCP 面板",
+    "start_server": "启动服务器",
+    "stop_server": "停止服务器",
+    "server_status": "服务器状态",
+    "port": "端口",
+    "settings": "设置",
+    "connected": "已连接",
+    "disconnected": "未连接",
+    "auto_start": "自动启动",
+    "debug_log": "调试日志",
+    "max_connections": "最大连接数",
+    "connection_info": "连接信息",
+    "http_url": "HTTP 地址",
+    "copy": "复制",
+    "save_settings": "保存设置",
+    "tool_manager": "工具管理器",
+    "select_all": "全选",
+    "deselect_all": "取消全选",
+    "save_changes": "保存更改",
+    "total_tools": "总工具数",
+    "enabled_tools": "已启用",
+    "disabled_tools": "已禁用",
+    "server_tab": "服务器",
+    "tools_tab": "工具管理"
+};

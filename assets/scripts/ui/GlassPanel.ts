@@ -17,12 +17,12 @@ export interface GlassPanelOptions {
 const defaultStyle = (): GlassPanelOptions => ({
   width: 220,
   height: 120,
-  radius: 24,
+  radius: 26,
   fillColor: PANEL_FILL,
   strokeColor: PANEL_BORDER,
   shadowColor: PANEL_SHADOW,
-  highlightColor: new Color(255, 255, 255, 120),
-  glowColor: new Color(255, 255, 255, 28),
+  highlightColor: new Color(224, 240, 255, 122),
+  glowColor: new Color(136, 190, 255, 34),
 });
 
 @ccclass('GlassPanel')
@@ -64,38 +64,38 @@ export class GlassPanel extends Component {
     body.fillColor = this.style.fillColor;
     body.roundRect(-this.style.width * 0.5, -this.style.height * 0.5, this.style.width, this.style.height, this.style.radius);
     body.fill();
-    body.lineWidth = 2;
+    body.lineWidth = 1.6;
     body.strokeColor = this.style.strokeColor;
     body.roundRect(-this.style.width * 0.5, -this.style.height * 0.5, this.style.width, this.style.height, this.style.radius);
     body.stroke();
 
     highlight.clear();
-    highlight.lineWidth = 2;
+    highlight.lineWidth = 1.4;
     highlight.strokeColor = this.style.highlightColor;
-    highlight.moveTo(-this.style.width * 0.5 + 18, this.style.height * 0.5 - 20);
-    highlight.lineTo(this.style.width * 0.5 - 18, this.style.height * 0.5 - 20);
+    highlight.moveTo(-this.style.width * 0.5 + 16, this.style.height * 0.5 - 16);
+    highlight.lineTo(this.style.width * 0.5 - 16, this.style.height * 0.5 - 16);
     highlight.stroke();
-    highlight.fillColor = new Color(this.style.highlightColor.r, this.style.highlightColor.g, this.style.highlightColor.b, Math.round(this.style.highlightColor.a * 0.45));
+    highlight.fillColor = new Color(this.style.highlightColor.r, this.style.highlightColor.g, this.style.highlightColor.b, Math.round(this.style.highlightColor.a * 0.28));
     highlight.roundRect(
-      -this.style.width * 0.5 + 16,
-      this.style.height * 0.18,
-      Math.max(56, this.style.width * 0.42),
-      14,
-      7,
+      -this.style.width * 0.5 + 14,
+      this.style.height * 0.16,
+      Math.max(52, this.style.width * 0.36),
+      12,
+      6,
     );
     highlight.fill();
 
     glow.clear();
     glow.fillColor = this.style.glowColor;
-    glow.circle(-this.style.width * 0.22, this.style.height * 0.14, Math.min(this.style.width, this.style.height) * 0.18);
+    glow.circle(-this.style.width * 0.2, this.style.height * 0.14, Math.min(this.style.width, this.style.height) * 0.2);
     glow.fill();
-    glow.fillColor = new Color(this.style.glowColor.r, this.style.glowColor.g, this.style.glowColor.b, Math.round(this.style.glowColor.a * 0.65));
-    glow.circle(this.style.width * 0.16, -this.style.height * 0.1, Math.min(this.style.width, this.style.height) * 0.12);
+    glow.fillColor = new Color(this.style.glowColor.r, this.style.glowColor.g, this.style.glowColor.b, Math.round(this.style.glowColor.a * 0.55));
+    glow.circle(this.style.width * 0.18, -this.style.height * 0.08, Math.min(this.style.width, this.style.height) * 0.1);
     glow.fill();
   }
 
   private ensureNodes() {
-    this.shadowNode = this.ensureChild('GlassShadow', new Vec3(0, -6, 0));
+    this.shadowNode = this.ensureChild('GlassShadow', new Vec3(0, -8, 0));
     this.highlightNode = this.ensureChild('GlassHighlight', new Vec3(0, 0, 0));
     this.glowNode = this.ensureChild('GlassGlow', new Vec3(0, 0, 0));
   }

@@ -20,7 +20,7 @@ export const levels: LevelConfig[] = [
   {
     id: 'level-1',
     name: '镜面初识',
-    hint: '把镜子挪到光束前方，再微调角度，让白光折向上方目标。',
+    hint: '从下方拖出镜子，放到光束前方并旋转，让白光折向上方目标。',
     playArea: { width: PLAY_AREA_RECT.width, height: PLAY_AREA_RECT.height },
     sources: [
       { id: 'source-1', x: 54, y: 300, angle: 0, color: 'white', intensity: 1, beamWidth: 10 },
@@ -38,7 +38,7 @@ export const levels: LevelConfig[] = [
   {
     id: 'level-2',
     name: '二次反射',
-    hint: '第一枚镜子已经接住主光，继续微调两面镜子的角度，把反射链送往右上终点。',
+    hint: '从道具栏拖出两面镜子，接力反射，把光路送往右上终点。',
     playArea: { width: PLAY_AREA_RECT.width, height: PLAY_AREA_RECT.height },
     sources: [
       { id: 'source-1', x: 54, y: 238, angle: 0, color: 'white', intensity: 1, beamWidth: 10 },
@@ -57,7 +57,7 @@ export const levels: LevelConfig[] = [
   {
     id: 'level-3',
     name: '绕开遮挡',
-    hint: '主光已经被抬到高处，继续旋转第二面镜子，让光线滑过墙体上沿命中目标。',
+    hint: '先把镜子抬高绕开障碍，再微调角度，让光线贴着墙体上沿命中目标。',
     playArea: { width: PLAY_AREA_RECT.width, height: PLAY_AREA_RECT.height },
     sources: [
       { id: 'source-1', x: 54, y: 236, angle: 0, color: 'white', intensity: 1, beamWidth: 10 },
@@ -78,7 +78,7 @@ export const levels: LevelConfig[] = [
   {
     id: 'level-4',
     name: '三棱分光',
-    hint: '保持白光穿过棱镜中段，重点转动角度，让分出的红光命中目标。',
+    hint: '拖出三棱镜并旋转，让白光在中段分光后，把红光送到目标。',
     playArea: { width: PLAY_AREA_RECT.width, height: PLAY_AREA_RECT.height },
     sources: [
       { id: 'source-1', x: 54, y: 372, angle: 0, color: 'white', intensity: 1, beamWidth: 10 },
@@ -100,7 +100,7 @@ export const levels: LevelConfig[] = [
   {
     id: 'level-5',
     name: '颜色匹配',
-    hint: '蓝光几乎已经对齐，继续转动镜子，把红光折向上方目标。',
+    hint: '先把棱镜分出蓝光，再拖镜子调整，让红光也折向上方目标。',
     playArea: { width: PLAY_AREA_RECT.width, height: PLAY_AREA_RECT.height },
     sources: [
       { id: 'source-1', x: 52, y: 360, angle: 0, color: 'white', intensity: 1, beamWidth: 10 },

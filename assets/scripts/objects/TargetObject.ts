@@ -42,14 +42,14 @@ export class TargetObject extends Component {
     graphics.clear();
     const accepted = this.snapshot.acceptedColors[0] ?? 'white';
     const ring = colorToDisplayColor(accepted);
-    graphics.fillColor = new Color(255, 255, 255, this.hit ? 120 : 52);
+    graphics.fillColor = new Color(225, 238, 255, this.hit ? 128 : 58);
     graphics.circle(0, 0, this.snapshot.radius + 10);
     graphics.fill();
     graphics.lineWidth = 6;
-    graphics.strokeColor = new Color(ring.r, ring.g, ring.b, this.hit ? 255 : 196);
+    graphics.strokeColor = new Color(ring.r, ring.g, ring.b, this.hit ? 255 : 204);
     graphics.circle(0, 0, this.snapshot.radius);
     graphics.stroke();
-    graphics.fillColor = new Color(ring.r, ring.g, ring.b, this.hit ? 175 : 70);
+    graphics.fillColor = new Color(ring.r, ring.g, ring.b, this.hit ? 184 : 78);
     graphics.circle(0, 0, this.hit ? this.snapshot.radius - 3 : this.snapshot.radius - 8);
     graphics.fill();
   }
