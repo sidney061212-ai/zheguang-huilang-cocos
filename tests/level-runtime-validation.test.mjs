@@ -155,7 +155,7 @@ test('levels should contain 8 mechanism validation stages', () => {
   assert.equal(levels.length, 8, 'levels.ts should contain exactly 8 levels for mechanism validation');
 });
 
-test('initial runtime clear state: level 1 may clear, levels 2-8 must not clear', () => {
+test('initial runtime clear state: all 8 levels must not clear', () => {
   const { levels, constants, RaySolver } = loadRuntime();
   assert.equal(levels.length, 8, 'this validation expects 8 levels');
 
@@ -166,8 +166,7 @@ test('initial runtime clear state: level 1 may clear, levels 2-8 must not clear'
     return isClearedFromResult(result, level);
   });
 
-  assert.equal(initialClears[0], true, 'level 1 should support initial clear as tutorial demonstration');
-  initialClears.slice(1).forEach((cleared, index) => {
-    assert.equal(cleared, false, `level ${index + 2} should not be cleared in initial state`);
+  initialClears.forEach((cleared, index) => {
+    assert.equal(cleared, false, `level ${index + 1} should not be cleared in initial state`);
   });
 });

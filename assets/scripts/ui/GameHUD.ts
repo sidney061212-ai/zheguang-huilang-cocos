@@ -7,6 +7,16 @@ export interface GameHUDCallbacks {
   onBack: () => void;
   onReset: () => void;
   onSettings: () => void;
+  onRotateLeft?: () => void;
+  onRotateRight?: () => void;
+  onUndo?: () => void;
+}
+
+export interface HUDDebugMetrics {
+  levelId: string | number;
+  raySegments: number;
+  hitTargets: string | number;
+  recomputeMs: number;
 }
 
 export class GameHUD {
@@ -17,8 +27,15 @@ export class GameHUD {
   private readonly angleLabel: Label;
   private readonly levelHintLabel: Label;
   private readonly hintLabel: Label;
+  private readonly debugLabel: Label;
   private readonly reasonLabel: Label;
   private reasonTimer: ReturnType<typeof setTimeout> | null = null;
+  private debugMetrics: HUDDebugMetrics = {
+    levelId: '--',
+    raySegments: 0,
+    hitTargets: '0/0',
+    recomputeMs: 0,
+  };
 
   constructor(layer: number, callbacks: GameHUDCallbacks) {
     this.node = new Node('GameHUD');
@@ -70,6 +87,48 @@ export class GameHUD {
     this.titleLabel = makeLabel(top.node, layer, '镜面初识', 21, UI_TEXT, new Vec3(0, 12, 0), 180, 30, 'center');
     this.statusLabel = makeLabel(top.node, layer, '目标 0/1 · 光能 0%', 13, UI_SUBTEXT, new Vec3(0, -16, 0), 190, 22, 'center');
 
+    const controls = createGlassPanelNode('ControlPanel', layer, 220, 50, {
+      radius: 22,
+      fillColor: new Color(18, 34, 58, 184),
+      strokeColor: new Color(174, 208, 245, 110),
+      glowColor: new Color(112, 172, 255, 36),
+    });
+    controls.node.parent = this.node;
+    controls.node.setPosition(0, 262, 0);
+
+    const rotateLeftButton = createGlassButton('HudRotateLeft', layer, {
+      text: '左转',
+      width: 62,
+      height: 38,
+      fontSize: 13,
+      variant: 'secondary',
+      onTap: () => callbacks.onRotateLeft?.(),
+    });
+    rotateLeftButton.node.parent = controls.node;
+    rotateLeftButton.node.setPosition(-72, 0, 0);
+
+    const rotateRightButton = createGlassButton('HudRotateRight', layer, {
+      text: '右转',
+      width: 62,
+      height: 38,
+      fontSize: 13,
+      variant: 'secondary',
+      onTap: () => callbacks.onRotateRight?.(),
+    });
+    rotateRightButton.node.parent = controls.node;
+    rotateRightButton.node.setPosition(0, 0, 0);
+
+    const undoButton = createGlassButton('HudUndo', layer, {
+      text: '撤销',
+      width: 62,
+      height: 38,
+      fontSize: 13,
+      variant: 'ghost',
+      onTap: () => callbacks.onUndo?.(),
+    });
+    undoButton.node.parent = controls.node;
+    undoButton.node.setPosition(72, 0, 0);
+
     const reason = createGlassPanelNode('ReasonPanel', layer, 292, 42, {
       radius: 22,
       fillColor: new Color(36, 24, 22, 196),
@@ -95,6 +154,28 @@ export class GameHUD {
     this.angleLabel = makeLabel(info.node, layer, '角度 --', 12, UI_SUBTEXT, new Vec3(0, -12, 0), 304, 18, 'center');
     this.hintLabel = makeLabel(info.node, layer, '从下方道具栏拖入，再用手指外圈拖动调整角度。', 12, UI_SUBTEXT, new Vec3(0, -34, 0), 308, 30, 'center');
     this.hintLabel.enableWrapText = true;
+
+    const debugPanel = createGlassPanelNode('DebugPanel', layer, 168, 72, {
+      radius: 18,
+      fillColor: new Color(12, 24, 44, 198),
+      strokeColor: new Color(136, 184, 242, 110),
+      glowColor: new Color(92, 152, 228, 24),
+    });
+    debugPanel.node.parent = this.node;
+    debugPanel.node.setPosition(104, 208, 0);
+    this.debugLabel = makeLabel(
+      debugPanel.node,
+      layer,
+      '',
+      11,
+      new Color(184, 210, 238, 255),
+      new Vec3(0, 0, 0),
+      150,
+      58,
+      'left',
+    );
+    this.debugLabel.enableWrapText = true;
+    this.refreshDebugMetrics();
   }
 
   setVisible(visible: boolean) {
@@ -128,6 +209,14 @@ export class GameHUD {
     this.hintLabel.string = text;
   }
 
+  setDebugMetrics(metrics: Partial<HUDDebugMetrics>) {
+    this.debugMetrics = {
+      ...this.debugMetrics,
+      ...metrics,
+    };
+    this.refreshDebugMetrics();
+  }
+
   showFailureReason(text: string, durationMs = 1500) {
     this.reasonLabel.string = text;
     this.reasonLabel.node.parent!.active = true;
@@ -146,6 +235,18 @@ export class GameHUD {
       this.reasonTimer = null;
     }
     this.reasonLabel.node.parent!.active = false;
+  }
+
+  private refreshDebugMetrics() {
+    const recomputeMs = Number.isFinite(this.debugMetrics.recomputeMs)
+      ? this.debugMetrics.recomputeMs.toFixed(2)
+      : '--';
+    this.debugLabel.string = [
+      `L: ${this.debugMetrics.levelId}`,
+      `Rays: ${this.debugMetrics.raySegments}`,
+      `Hits: ${this.debugMetrics.hitTargets}`,
+      `Δt: ${recomputeMs}ms`,
+    ].join('\n');
   }
 }
 

@@ -10,6 +10,7 @@ import {
   LANDSCAPE_HINT,
   PLAY_AREA_RECT,
   PLAY_AREA_TINT,
+  ROTATE_STEP_DEGREES,
   UI_TEXT,
 } from '../core/Constants';
 import { GameState } from '../core/GameState';
@@ -34,6 +35,8 @@ import { GameHUD } from '../ui/GameHUD';
 import { HomeView } from '../ui/HomeView';
 import { LevelSelectView } from '../ui/LevelSelectView';
 import { SettingsPopup } from '../ui/SettingsPopup';
+import { UIManager } from '../ui/UIManager';
+import { LevelManager } from './LevelManager';
 
 const { ccclass } = _decorator;
 
@@ -75,6 +78,14 @@ interface RuntimeTargetState {
   bestIntensity: number;
   bestColor?: SolverColor;
   lastReason?: TargetFrameState['reason'];
+}
+
+interface OpticUndoState {
+  id: string;
+  type: 'mirror' | 'prism';
+  position: Vec2;
+  angle: number;
+  inInventory: boolean;
 }
 
 type SolverResultLike = {
@@ -123,6 +134,8 @@ export class GameApp extends Component {
   private readonly gameState = new GameState();
   private readonly solver = new RaySolver();
   private readonly audio = new AudioManager(() => this.gameState.sfxEnabled);
+  private levelManager: LevelManager | null = null;
+  private uiManager: UIManager | null = null;
 
   private canvasTransform!: UITransform;
   private frame!: Node;
@@ -178,6 +191,11 @@ export class GameApp extends Component {
   private previousImpactKeys = new Set<string>();
   private impactCooldowns = new Map<string, number>();
   private lastFailureReason = '';
+  private recomputeQueued = false;
+  private recomputeMinIntervalMs = 16;
+  private lastRecomputeAt = 0;
+  private lastRecomputeMs = 0;
+  private undoStack: OpticUndoState[][] = [];
 
   private lastCanvasKey = '';
 
@@ -192,6 +210,7 @@ export class GameApp extends Component {
       this.buildBackground();
       this.buildGameRoot();
       this.buildViews();
+      this.levelManager = new LevelManager({ levels, gameState: this.gameState });
       this.buildLandscapeHint();
 
       this.syncLayout();
@@ -212,6 +231,7 @@ export class GameApp extends Component {
       if (nextKey !== this.lastCanvasKey) {
         this.syncLayout();
       }
+      this.flushQueuedRecompute();
       this.tickRuntimeTargets(deltaTime);
       this.refreshDiagnostics();
     } catch (error) {
@@ -462,6 +482,9 @@ export class GameApp extends Component {
       onBack: () => this.handleUiClick(() => this.showLevelSelect()),
       onReset: () => this.handleUiClick(() => this.resetCurrentLevel()),
       onSettings: () => this.handleUiClick(() => this.openSettings()),
+      onRotateLeft: () => this.handleUiClick(() => this.rotateSelection(-ROTATE_STEP_DEGREES)),
+      onRotateRight: () => this.handleUiClick(() => this.rotateSelection(ROTATE_STEP_DEGREES)),
+      onUndo: () => this.handleUiClick(() => this.undoLastMove()),
     });
     this.hud.node.parent = this.hudRoot;
     this.hud.setVisible(false);
@@ -472,6 +495,7 @@ export class GameApp extends Component {
       onLevelSelect: () => this.handleUiClick(() => this.showLevelSelect()),
     });
     this.clearPopup.node.parent = this.popupRoot;
+    this.uiManager = new UIManager({ hud: this.hud, clearPopup: this.clearPopup });
 
     this.settingsPopup = new SettingsPopup(layer, {
       onToggleSfx: () => this.handleUiClick(() => {
@@ -518,9 +542,13 @@ export class GameApp extends Component {
     this.homeView.setVisible(true);
     this.levelSelectView.setVisible(false);
     this.gameRoot.active = false;
-    this.hud.setVisible(false);
+    if (this.uiManager) {
+      this.uiManager.hideAllGameUI();
+    } else {
+      this.hud.setVisible(false);
+      this.clearPopup.hide();
+    }
     this.clearShowing = false;
-    this.clearPopup.hide();
     this.closeSettings();
     this.dragRotateController?.clearSelection();
   }
@@ -528,8 +556,9 @@ export class GameApp extends Component {
   private showLevelSelect() {
     this.currentMode = GameMode.LevelSelect;
     this.setStatus('current mode: select');
+    const levelList = this.levelManager?.getLevels() ?? levels;
     this.levelSelectView.refresh(
-      levels,
+      levelList,
       this.gameState.getClearedIds(),
       this.getRecommendedLevelIndex(),
       this.currentLevel ? this.currentLevelIndex : -1,
@@ -537,26 +566,36 @@ export class GameApp extends Component {
     this.homeView.setVisible(false);
     this.levelSelectView.setVisible(true);
     this.gameRoot.active = false;
-    this.hud.setVisible(false);
+    if (this.uiManager) {
+      this.uiManager.hideAllGameUI();
+    } else {
+      this.hud.setVisible(false);
+      this.clearPopup.hide();
+    }
     this.clearShowing = false;
-    this.clearPopup.hide();
     this.closeSettings();
     this.dragRotateController?.clearSelection();
   }
 
   private enterLevel(index: number) {
-    const safeIndex = clamp(index, 0, levels.length - 1);
+    const fallbackIndex = clamp(index, 0, levels.length - 1);
+    const resolvedLevel = this.levelManager ? this.levelManager.loadLevel(index) : levels[fallbackIndex];
+    const resolvedIndex = this.levelManager ? this.levelManager.getCurrentLevelIndex() : fallbackIndex;
     this.currentMode = GameMode.Game;
-    this.currentLevelIndex = safeIndex;
+    this.currentLevelIndex = resolvedIndex;
     this.setStatus(`current mode: game`);
     this.homeView.setVisible(false);
     this.levelSelectView.setVisible(false);
     this.gameRoot.active = true;
-    this.hud.setVisible(true);
+    if (this.uiManager) {
+      this.uiManager.showGameplayUI();
+    } else {
+      this.hud.setVisible(true);
+      this.clearPopup.hide();
+    }
     this.clearShowing = false;
-    this.clearPopup.hide();
     this.closeSettings();
-    this.loadLevel(levels[safeIndex]);
+    this.loadLevel(resolvedLevel ?? levels[resolvedIndex]);
   }
 
   private loadLevel(level: LevelConfig) {
@@ -571,6 +610,9 @@ export class GameApp extends Component {
       this.latestFrameTargetStates.clear();
       this.runtimeTargetStates.clear();
       this.lastFailureReason = '';
+      this.undoStack = [];
+      this.recomputeQueued = false;
+      this.lastRecomputeMs = 0;
 
       this.dragRotateController?.dispose();
       this.dragRotateController = null;
@@ -629,19 +671,37 @@ export class GameApp extends Component {
         this.audio,
         {
           onSelectionChanged: (object) => this.onSelectionChanged(object),
-          onWorldChanged: () => this.recalculateWorld(),
+          onWorldChanged: () => this.queueRecompute(),
+          onInteractionCommitted: (_object, _mode, changed) => this.onInteractionCommitted(changed),
         },
       );
       [...this.mirrorObjects, ...this.prismObjects].forEach((object) => this.dragRotateController?.register(object));
 
-      this.hud.setLevelTitle(level.name);
-      this.hud.setLevelHint(level.hint);
-      this.hud.setSelectionInfo('未选择道具');
-      this.hud.setSelectionAngle(null);
-      this.hud.setHint('从下方道具栏拖入，选中后沿外圈拖动可旋转方向。');
-      this.hud.clearFailureReason();
+      this.recordUndoState();
+      const requiredTargetCount = level.targets.filter((target) => target.required).length;
+      if (this.uiManager) {
+        this.uiManager.showLevelHUD({
+          levelTitle: level.name,
+          levelHint: level.hint,
+          hitCount: 0,
+          totalCount: requiredTargetCount,
+          energyPercent: 0,
+          selectionText: '未选择道具',
+          selectionAngle: null,
+          hintText: '从下方道具栏拖入，选中后沿外圈拖动可旋转方向。',
+        });
+        this.uiManager.clearFailureReason();
+      } else {
+        this.hud.setLevelTitle(level.name);
+        this.hud.setLevelHint(level.hint);
+        this.hud.setTargetSummary(0, requiredTargetCount, 0);
+        this.hud.setSelectionInfo('未选择道具');
+        this.hud.setSelectionAngle(null);
+        this.hud.setHint('从下方道具栏拖入，选中后沿外圈拖动可旋转方向。');
+        this.hud.clearFailureReason();
+      }
       this.setStatus(`current mode: game · ${level.name}`);
-      this.recalculateWorld();
+      this.recalculateWorldImmediate();
     } catch (error) {
       this.reportError(`loadLevel:${level.id}`, error);
     }
@@ -651,12 +711,18 @@ export class GameApp extends Component {
     if (!this.currentLevel) {
       return;
     }
-    this.enterLevel(this.currentLevelIndex);
+    const index = this.levelManager?.getCurrentLevelIndex() ?? this.currentLevelIndex;
+    this.enterLevel(index);
   }
 
   private advanceLevel() {
-    if (this.currentLevelIndex >= levels.length - 1) {
+    if (!(this.levelManager?.hasNextLevel() ?? (this.currentLevelIndex < levels.length - 1))) {
       this.showLevelSelect();
+      return;
+    }
+    const nextLevel = this.levelManager?.loadNextLevel();
+    if (nextLevel) {
+      this.enterLevel(this.levelManager?.getCurrentLevelIndex() ?? this.currentLevelIndex + 1);
       return;
     }
     this.enterLevel(this.currentLevelIndex + 1);
@@ -673,28 +739,201 @@ export class GameApp extends Component {
 
   private onSelectionChanged(object: DraggableOpticObject | null) {
     if (!object) {
-      this.hud.setSelectionInfo('未选择道具');
-      this.hud.setSelectionAngle(null);
-      this.hud.setHint(this.currentLevel?.hint ?? '从道具栏拖入，沿外圈拖动旋转。');
+      if (this.uiManager) {
+        this.uiManager.updateSelection('未选择道具', null);
+        this.uiManager.updateHint(this.currentLevel?.hint ?? '从道具栏拖入，沿外圈拖动旋转。');
+      } else {
+        this.hud.setSelectionInfo('未选择道具');
+        this.hud.setSelectionAngle(null);
+        this.hud.setHint(this.currentLevel?.hint ?? '从道具栏拖入，沿外圈拖动旋转。');
+      }
       return;
     }
     const status = object.isInInventory() ? '（道具栏）' : '';
-    this.hud.setSelectionInfo(`${object.getDisplayName()} ${status}`.trim());
-    this.hud.setSelectionAngle(object.getAngle());
-    this.hud.setHint(object.isInInventory() ? '继续上拖放入可玩区。' : '拖动移动，沿外圈拖动可旋转方向。');
+    if (this.uiManager) {
+      this.uiManager.updateSelection(`${object.getDisplayName()} ${status}`.trim(), object.getAngle());
+      this.uiManager.updateHint(object.isInInventory() ? '继续上拖放入可玩区。' : '拖动移动，沿外圈拖动可旋转方向。');
+    } else {
+      this.hud.setSelectionInfo(`${object.getDisplayName()} ${status}`.trim());
+      this.hud.setSelectionAngle(object.getAngle());
+      this.hud.setHint(object.isInInventory() ? '继续上拖放入可玩区。' : '拖动移动，沿外圈拖动可旋转方向。');
+    }
   }
 
-  private recalculateWorld() {
+  private queueRecompute() {
+    this.recomputeQueued = true;
+  }
+
+  private flushQueuedRecompute() {
+    if (!this.recomputeQueued || !this.currentLevel) {
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastRecomputeAt < this.recomputeMinIntervalMs) {
+      return;
+    }
+    this.recomputeQueued = false;
+    this.recalculateWorldImmediate();
+  }
+
+  private recalculateWorldImmediate() {
     if (!this.currentLevel) {
       return;
     }
-
+    this.recomputeQueued = false;
+    const startedAt = Date.now();
     const result = this.solver.solve(this.buildSolveWorld(this.currentLevel)) as SolverResultLike;
+    this.lastRecomputeAt = startedAt;
+    this.lastRecomputeMs = Date.now() - startedAt;
     this.latestSolveResult = result;
     this.latestFrameTargetStates = this.buildFrameTargetStates(this.currentLevel, result);
     this.rayRenderer.render(result);
     this.applyImpactFeedback(result);
+    this.refreshHudDebugMetrics(result);
     this.tickRuntimeTargets(0);
+  }
+
+  private onInteractionCommitted(changed: boolean) {
+    if (!changed) {
+      return;
+    }
+    this.recordUndoState();
+  }
+
+  private refreshHudDebugMetrics(result: SolverResultLike) {
+    if (!this.currentLevel) {
+      return;
+    }
+    const raySegments = (result.rays ?? result.segments ?? []).length;
+    const requiredTargets = this.currentLevel.targets.filter((target) => target.required);
+    const hitTargets = requiredTargets.filter((target) => this.latestFrameTargetStates.get(target.id)?.hit).length;
+    const metrics = {
+      levelId: this.currentLevel.numericId,
+      raySegments,
+      hitTargets: `${hitTargets}/${requiredTargets.length}`,
+      recomputeMs: this.lastRecomputeMs,
+    };
+    if (this.uiManager) {
+      this.uiManager.updateDebugMetrics(metrics);
+    } else {
+      this.hud.setDebugMetrics(metrics);
+    }
+  }
+
+  private rotateSelection(deltaDegrees: number) {
+    if (!this.dragRotateController) {
+      return;
+    }
+    const before = this.captureUndoState();
+    const rotated = this.dragRotateController.rotateSelection(deltaDegrees);
+    this.dragRotateController.finishRotateInteraction();
+    if (!rotated) {
+      if (this.uiManager) {
+        this.uiManager.showFailureReason('请先选择可旋转道具', 1000);
+      } else {
+        this.hud.showFailureReason('请先选择可旋转道具', 1000);
+      }
+      return;
+    }
+    this.recordUndoStateFromSnapshots(before, this.captureUndoState());
+    this.queueRecompute();
+    this.flushQueuedRecompute();
+  }
+
+  private undoLastMove() {
+    if (this.undoStack.length <= 1) {
+      if (this.uiManager) {
+        this.uiManager.showFailureReason('没有可撤销步骤', 1000);
+      } else {
+        this.hud.showFailureReason('没有可撤销步骤', 1000);
+      }
+      this.audio.play(SoundKeys.InvalidAction);
+      return;
+    }
+    this.undoStack.pop();
+    const snapshot = this.undoStack[this.undoStack.length - 1];
+    if (!snapshot) {
+      return;
+    }
+    this.applyUndoState(snapshot);
+    this.onSelectionChanged(this.dragRotateController?.getSelection() ?? null);
+    this.queueRecompute();
+    this.recalculateWorldImmediate();
+  }
+
+  private recordUndoState() {
+    this.recordUndoStateFromSnapshots(undefined, this.captureUndoState());
+  }
+
+  private recordUndoStateFromSnapshots(previous: OpticUndoState[] | undefined, next: OpticUndoState[]) {
+    const top = this.undoStack[this.undoStack.length - 1];
+    if (previous && (!top || !this.isUndoStateEqual(top, previous))) {
+      this.undoStack.push(previous);
+    }
+    const latest = this.undoStack[this.undoStack.length - 1];
+    if (!latest || !this.isUndoStateEqual(latest, next)) {
+      this.undoStack.push(next);
+    }
+    if (this.undoStack.length > 48) {
+      this.undoStack.shift();
+    }
+  }
+
+  private captureUndoState() {
+    const mirrorStates = this.mirrorObjects.map((mirror) => ({
+      id: mirror.opticId,
+      type: 'mirror' as const,
+      position: mirror.getDesignPosition(),
+      angle: mirror.getAngle(),
+      inInventory: mirror.isInInventory(),
+    }));
+    const prismStates = this.prismObjects.map((prism) => ({
+      id: prism.opticId,
+      type: 'prism' as const,
+      position: prism.getDesignPosition(),
+      angle: prism.getAngle(),
+      inInventory: prism.isInInventory(),
+    }));
+    return [...mirrorStates, ...prismStates];
+  }
+
+  private applyUndoState(snapshot: OpticUndoState[]) {
+    const mirrorMap = new Map(this.mirrorObjects.map((mirror) => [mirror.opticId, mirror]));
+    const prismMap = new Map(this.prismObjects.map((prism) => [prism.opticId, prism]));
+    snapshot.forEach((state) => {
+      const target = state.type === 'mirror' ? mirrorMap.get(state.id) : prismMap.get(state.id);
+      if (!target) {
+        return;
+      }
+      target.applyDesignPosition(state.position);
+      target.applyAngle(state.angle);
+      target.setInventoryState(state.inInventory);
+      if (!state.inInventory) {
+        target.recordValidPosition();
+      }
+      target.setInteractionMode('idle');
+    });
+  }
+
+  private isUndoStateEqual(a: OpticUndoState[], b: OpticUndoState[]) {
+    if (a.length !== b.length) {
+      return false;
+    }
+    for (let i = 0; i < a.length; i += 1) {
+      const left = a[i];
+      const right = b[i];
+      if (
+        left.id !== right.id
+        || left.type !== right.type
+        || left.inInventory !== right.inInventory
+        || Math.abs(left.position.x - right.position.x) > 0.05
+        || Math.abs(left.position.y - right.position.y) > 0.05
+        || Math.abs(left.angle - right.angle) > 0.1
+      ) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private handleLevelClear(energyPercent: number) {
@@ -704,7 +943,10 @@ export class GameApp extends Component {
     this.clearShowing = true;
     this.currentMode = GameMode.Clear;
     this.setStatus(`current mode: clear · ${this.currentLevel.name}`);
-    this.gameState.markCleared(String(this.currentLevel.id));
+    this.levelManager?.markCurrentLevelCleared();
+    if (!this.levelManager) {
+      this.gameState.markCleared(String(this.currentLevel.id));
+    }
     this.audio.play(SoundKeys.LevelClear);
 
     this.targetObjects.forEach((target) => {
@@ -716,12 +958,17 @@ export class GameApp extends Component {
 
     const elapsedSeconds = (Date.now() - this.levelStartedAt) / 1000;
     const stars = elapsedSeconds <= 14 ? 3 : elapsedSeconds <= 28 ? 2 : 1;
-    this.clearPopup.show({
+    const payload = {
       timeSeconds: elapsedSeconds,
       energyPercent,
       stars,
       hasNext: this.currentLevelIndex < levels.length - 1,
-    });
+    };
+    if (this.uiManager) {
+      this.uiManager.showLevelClearPopup(payload);
+    } else {
+      this.clearPopup.show(payload);
+    }
 
   }
 
@@ -837,11 +1084,19 @@ export class GameApp extends Component {
     const energyPercent = requiredTargets.length
       ? Math.round((energyRatioTotal / requiredTargets.length) * 100)
       : 100;
-    this.hud.setTargetSummary(completedCount, requiredTargets.length, energyPercent);
+    if (this.uiManager) {
+      this.uiManager.updateTargetSummary(completedCount, requiredTargets.length, energyPercent);
+    } else {
+      this.hud.setTargetSummary(completedCount, requiredTargets.length, energyPercent);
+    }
 
     const reason = this.resolveFailureReason(requiredTargets, frameStates, hits);
     if (reason && reason !== this.lastFailureReason) {
-      this.hud.showFailureReason(reason, 1500);
+      if (this.uiManager) {
+        this.uiManager.showFailureReason(reason, 1500);
+      } else {
+        this.hud.showFailureReason(reason, 1500);
+      }
       this.lastFailureReason = reason;
     }
     if (!reason) {
@@ -1109,6 +1364,9 @@ export class GameApp extends Component {
   }
 
   private getRecommendedLevelIndex() {
+    if (this.levelManager) {
+      return this.levelManager.getRecommendedLevelIndex();
+    }
     const firstUncleared = levels.findIndex((level) => !this.gameState.isCleared(String(level.id)));
     return firstUncleared >= 0 ? firstUncleared : levels.length - 1;
   }

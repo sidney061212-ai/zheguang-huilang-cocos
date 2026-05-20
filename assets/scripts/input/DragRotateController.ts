@@ -10,6 +10,7 @@ import { DragSession } from './InputTypes';
 interface DragRotateCallbacks {
   onSelectionChanged: (object: DraggableOpticObject | null) => void;
   onWorldChanged: () => void;
+  onInteractionCommitted?: (object: DraggableOpticObject, mode: 'dragging' | 'rotating', changed: boolean) => void;
 }
 
 export class DragRotateController {
@@ -121,6 +122,7 @@ export class DragRotateController {
       lastValidPos: object.getLastValidPosition(),
       startedFromInventory: object.isInInventory(),
       isCurrentPlacementValid: true,
+      hasChanged: false,
     };
 
     object.elevate();
@@ -165,6 +167,7 @@ export class DragRotateController {
       return;
     }
     const session = this.session;
+    const endedMode: 'dragging' | 'rotating' = session.mode === 'rotating' ? 'rotating' : 'dragging';
     if (session.mode === 'dragging') {
       this.finishDragging(session);
     } else if (session.mode === 'rotating') {
@@ -174,6 +177,8 @@ export class DragRotateController {
       session.object.setInteractionMode('idle');
     }
 
+    const changed = this.hasSessionChanged(session);
+    this.callbacks.onInteractionCommitted?.(session.object, endedMode, changed);
     this.session = null;
     this.callbacks.onWorldChanged();
   }
@@ -209,6 +214,7 @@ export class DragRotateController {
         session.object.recordValidPosition();
       }
     }
+    session.hasChanged = this.hasSessionChanged(session);
 
     this.audio.play(SoundKeys.DragMove);
     this.callbacks.onWorldChanged();
@@ -223,6 +229,7 @@ export class DragRotateController {
       this.lastRotateStep = session.object.getAngle();
       this.audio.play(SoundKeys.Rotate);
     }
+    session.hasChanged = this.hasSessionChanged(session);
     this.callbacks.onSelectionChanged(session.object);
     this.callbacks.onWorldChanged();
   }
@@ -313,5 +320,17 @@ export class DragRotateController {
       normalized += 360;
     }
     return normalized;
+  }
+
+  private hasSessionChanged(session: DragSession) {
+    if (session.hasChanged) {
+      return true;
+    }
+    const position = session.object.getDesignPosition();
+    const angle = session.object.getAngle();
+    const moved = position.subtract(session.objectStartPos).lengthSqr() > 0.25;
+    const rotated = Math.abs(this.normalizeAngleDelta(angle - session.objectStartAngle)) > 0.1;
+    const inventoryChanged = session.object.isInInventory() !== session.startedFromInventory;
+    return moved || rotated || inventoryChanged;
   }
 }

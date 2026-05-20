@@ -13,4 +13,5 @@ export interface DragSession {
   lastValidPos: Vec2;
   startedFromInventory: boolean;
   isCurrentPlacementValid: boolean;
+  hasChanged: boolean;
 }
