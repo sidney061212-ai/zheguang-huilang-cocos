@@ -14,7 +14,6 @@ import {
 } from '../core/Constants';
 import { GameState } from '../core/GameState';
 import { LevelConfig, LightSourceConfig, MirrorConfig, ObstacleConfig, PrismConfig, TargetConfig } from '../core/LevelConfig';
-import { RayImpactEvent, SolveResult, SolveWorld, colorToDisplayColor } from '../core/LightTypes';
 import { levels } from '../data/levels';
 import { ClearEffect } from '../effects/ClearEffect';
 import { HitSpark } from '../effects/HitSpark';
@@ -37,6 +36,85 @@ import { LevelSelectView } from '../ui/LevelSelectView';
 import { SettingsPopup } from '../ui/SettingsPopup';
 
 const { ccclass } = _decorator;
+
+type SolverColor = 'white' | 'red' | 'green' | 'blue' | 'yellow' | 'cyan' | 'magenta' | string;
+
+interface SolveHitLike {
+  type: 'mirror' | 'prism' | 'target' | 'obstacle' | 'boundary' | string;
+  objectId?: string;
+  point: Vec2;
+  color: SolverColor;
+  intensity: number;
+}
+
+interface SolveSegmentLike {
+  start?: Vec2;
+  end?: Vec2;
+  from?: Vec2;
+  to?: Vec2;
+  color: SolverColor;
+  intensityStart: number;
+  intensityEnd: number;
+}
+
+interface TargetFrameState {
+  targetId: string;
+  hit: boolean;
+  colorMatched: boolean;
+  intensityEnough: boolean;
+  bestIntensity: number;
+  bestColor?: SolverColor;
+  reason: 'none' | 'wrong_color' | 'low_intensity' | 'not_hit';
+}
+
+interface RuntimeTargetState {
+  targetId: string;
+  charge: number;
+  chargeTime: number;
+  completed: boolean;
+  bestIntensity: number;
+  bestColor?: SolverColor;
+  lastReason?: TargetFrameState['reason'];
+}
+
+type SolverResultLike = {
+  segments?: SolveSegmentLike[];
+  rays?: SolveSegmentLike[];
+  impacts?: SolveHitLike[];
+  hits?: SolveHitLike[];
+  targetHits?: Record<string, { hit?: boolean; color?: SolverColor; intensity?: number }>;
+  targetStates?: Record<string, {
+    hit?: boolean;
+    completed?: boolean;
+    colorMatched?: boolean;
+    intensityEnough?: boolean;
+    color?: SolverColor;
+    bestColor?: SolverColor;
+    intensity?: number;
+    bestIntensity?: number;
+    reason?: TargetFrameState['reason'];
+  }>;
+};
+
+const colorToDisplayColor = (color: SolverColor) => {
+  switch (color) {
+    case 'red':
+      return new Color(255, 128, 146, 255);
+    case 'green':
+      return new Color(122, 236, 176, 255);
+    case 'blue':
+      return new Color(120, 196, 255, 255);
+    case 'yellow':
+      return new Color(255, 220, 120, 255);
+    case 'cyan':
+      return new Color(120, 238, 255, 255);
+    case 'magenta':
+      return new Color(255, 136, 238, 255);
+    case 'white':
+    default:
+      return new Color(241, 248, 255, 255);
+  }
+};
 
 @ccclass('GameApp')
 export class GameApp extends Component {
@@ -92,9 +170,14 @@ export class GameApp extends Component {
   private prismObjects: PrismObject[] = [];
   private targetObjects = new Map<string, TargetObject>();
   private obstacleObjects: ObstacleObject[] = [];
+  private latestSolveResult: SolverResultLike | null = null;
+  private latestFrameTargetStates = new Map<string, TargetFrameState>();
+  private runtimeTargetStates = new Map<string, RuntimeTargetState>();
   private previousTargetHits: Record<string, boolean> = {};
+  private previousTargetCompleted: Record<string, boolean> = {};
   private previousImpactKeys = new Set<string>();
   private impactCooldowns = new Map<string, number>();
+  private lastFailureReason = '';
 
   private lastCanvasKey = '';
 
@@ -119,7 +202,7 @@ export class GameApp extends Component {
     }
   }
 
-  update() {
+  update(deltaTime = 0) {
     if (!this.canvasTransform) {
       return;
     }
@@ -129,6 +212,7 @@ export class GameApp extends Component {
       if (nextKey !== this.lastCanvasKey) {
         this.syncLayout();
       }
+      this.tickRuntimeTargets(deltaTime);
       this.refreshDiagnostics();
     } catch (error) {
       this.reportError('update', error);
@@ -480,8 +564,13 @@ export class GameApp extends Component {
       this.currentLevel = level;
       this.levelStartedAt = Date.now();
       this.previousTargetHits = {};
+      this.previousTargetCompleted = {};
       this.previousImpactKeys.clear();
       this.impactCooldowns.clear();
+      this.latestSolveResult = null;
+      this.latestFrameTargetStates.clear();
+      this.runtimeTargetStates.clear();
+      this.lastFailureReason = '';
 
       this.dragRotateController?.dispose();
       this.dragRotateController = null;
@@ -500,7 +589,16 @@ export class GameApp extends Component {
 
       level.sources.forEach((source) => this.sourceObjects.push(this.createSource(source)));
       level.obstacles.forEach((obstacle) => this.obstacleObjects.push(this.createObstacle(obstacle)));
-      level.targets.forEach((target) => this.targetObjects.set(target.id, this.createTarget(target)));
+      level.targets.forEach((target) => {
+        this.targetObjects.set(target.id, this.createTarget(target));
+        this.runtimeTargetStates.set(target.id, {
+          targetId: target.id,
+          charge: 0,
+          chargeTime: Math.max(0.25, Number((target as { chargeTime?: number }).chargeTime ?? 0.25)),
+          completed: false,
+          bestIntensity: 0,
+        });
+      });
       const toolSlots = this.computeToolInventoryPositions(level.mirrors.length + level.prisms.length);
       let toolIndex = 0;
       level.mirrors.forEach((mirror) => {
@@ -537,8 +635,11 @@ export class GameApp extends Component {
       [...this.mirrorObjects, ...this.prismObjects].forEach((object) => this.dragRotateController?.register(object));
 
       this.hud.setLevelTitle(level.name);
+      this.hud.setLevelHint(level.hint);
       this.hud.setSelectionInfo('未选择道具');
+      this.hud.setSelectionAngle(null);
       this.hud.setHint('从下方道具栏拖入，选中后沿外圈拖动可旋转方向。');
+      this.hud.clearFailureReason();
       this.setStatus(`current mode: game · ${level.name}`);
       this.recalculateWorld();
     } catch (error) {
@@ -573,11 +674,13 @@ export class GameApp extends Component {
   private onSelectionChanged(object: DraggableOpticObject | null) {
     if (!object) {
       this.hud.setSelectionInfo('未选择道具');
+      this.hud.setSelectionAngle(null);
       this.hud.setHint(this.currentLevel?.hint ?? '从道具栏拖入，沿外圈拖动旋转。');
       return;
     }
     const status = object.isInInventory() ? '（道具栏）' : '';
-    this.hud.setSelectionInfo(`${object.describeSelection()} ${status}`.trim());
+    this.hud.setSelectionInfo(`${object.getDisplayName()} ${status}`.trim());
+    this.hud.setSelectionAngle(object.getAngle());
     this.hud.setHint(object.isInInventory() ? '继续上拖放入可玩区。' : '拖动移动，沿外圈拖动可旋转方向。');
   }
 
@@ -586,29 +689,22 @@ export class GameApp extends Component {
       return;
     }
 
-    const result = this.solver.solve(this.buildSolveWorld(this.currentLevel));
+    const result = this.solver.solve(this.buildSolveWorld(this.currentLevel)) as SolverResultLike;
+    this.latestSolveResult = result;
+    this.latestFrameTargetStates = this.buildFrameTargetStates(this.currentLevel, result);
     this.rayRenderer.render(result);
-    this.applyTargetState(result);
     this.applyImpactFeedback(result);
-
-    const requiredTargets = this.currentLevel.targets.filter((target) => target.required);
-    const hitCount = requiredTargets.filter((target) => result.targetHits[target.id]?.hit).length;
-    const energyPercent = this.computeEnergyPercent(requiredTargets, result);
-    this.hud.setTargetSummary(hitCount, requiredTargets.length, energyPercent);
-
-    if (result.cleared && !this.clearShowing) {
-      this.handleLevelClear(energyPercent, result);
-    }
+    this.tickRuntimeTargets(0);
   }
 
-  private handleLevelClear(energyPercent: number, _result: SolveResult) {
+  private handleLevelClear(energyPercent: number) {
     if (!this.currentLevel) {
       return;
     }
     this.clearShowing = true;
     this.currentMode = GameMode.Clear;
     this.setStatus(`current mode: clear · ${this.currentLevel.name}`);
-    this.gameState.markCleared(this.currentLevel.id);
+    this.gameState.markCleared(String(this.currentLevel.id));
     this.audio.play(SoundKeys.LevelClear);
 
     this.targetObjects.forEach((target) => {
@@ -629,27 +725,12 @@ export class GameApp extends Component {
 
   }
 
-  private applyTargetState(result: SolveResult) {
-    this.targetObjects.forEach((targetObject, id) => {
-      const hit = result.targetHits[id]?.hit ?? false;
-      targetObject.setHit(hit);
-      if (hit && !this.previousTargetHits[id]) {
-        const snapshot = targetObject.toSnapshot();
-        const local = this.toLocal(snapshot.position);
-        const color = colorToDisplayColor(snapshot.acceptedColors[0] ?? 'white');
-        HitSpark.spawn(this.effectRoot, local.x, local.y, color, snapshot.radius + 10);
-        this.audio.play(SoundKeys.TargetCharge);
-        this.audio.play(SoundKeys.RayHitTarget);
-      }
-      this.previousTargetHits[id] = hit;
-    });
-  }
-
-  private applyImpactFeedback(result: SolveResult) {
+  private applyImpactFeedback(result: SolverResultLike) {
     const newKeys = new Set<string>();
-    const watchTypes: Array<RayImpactEvent['type']> = ['mirror', 'prism'];
+    const watchTypes: Array<SolveHitLike['type']> = ['mirror', 'prism'];
+    const hits = this.extractHits(result);
     watchTypes.forEach((type) => {
-      const impact = result.impacts.find((item) => item.type === type);
+      const impact = hits.find((item) => item.type === type);
       if (!impact) {
         return;
       }
@@ -667,18 +748,212 @@ export class GameApp extends Component {
     this.previousImpactKeys = newKeys;
   }
 
-  private computeEnergyPercent(targets: TargetConfig[], result: SolveResult) {
-    if (!targets.length) {
-      return 100;
+  private tickRuntimeTargets(deltaTime: number) {
+    if (!this.currentLevel || !this.latestSolveResult) {
+      return;
     }
-    const total = targets.reduce((sum, target) => {
-      const ratio = (result.targetHits[target.id]?.intensity ?? 0) / Math.max(target.requiredIntensity, 0.001);
-      return sum + clamp(ratio, 0, 1);
-    }, 0);
-    return Math.round((total / targets.length) * 100);
+    if (this.currentMode !== GameMode.Game) {
+      return;
+    }
+
+    const frameStates = this.latestFrameTargetStates;
+    const hits = this.extractHits(this.latestSolveResult);
+    const requiredTargets = this.currentLevel.targets.filter((target) => target.required);
+    const targetById = new Map(this.currentLevel.targets.map((target) => [target.id, target]));
+    const dt = Math.max(0, deltaTime);
+
+    let completedCount = 0;
+    let energyRatioTotal = 0;
+
+    this.targetObjects.forEach((targetObject, id) => {
+      const runtime = this.runtimeTargetStates.get(id);
+      const frameState = frameStates.get(id) ?? {
+        targetId: id,
+        hit: false,
+        colorMatched: false,
+        intensityEnough: false,
+        bestIntensity: 0,
+        reason: 'not_hit',
+      };
+      if (!runtime) {
+        return;
+      }
+
+      const target = targetById.get(id);
+      const chargeTime = target
+        ? Math.max(0.25, Number((target as { chargeTime?: number }).chargeTime ?? runtime.chargeTime))
+        : runtime.chargeTime;
+      runtime.chargeTime = chargeTime;
+
+      const wasCompleted = runtime.completed;
+      const validHit = frameState.hit && frameState.colorMatched && frameState.intensityEnough;
+      runtime.charge = validHit ? Math.min(chargeTime, runtime.charge + dt) : 0;
+      runtime.completed = runtime.charge + 1e-4 >= chargeTime;
+      runtime.bestIntensity = Math.max(frameState.bestIntensity, validHit ? runtime.bestIntensity : runtime.bestIntensity * 0.6);
+      runtime.bestColor = frameState.bestColor;
+      runtime.lastReason = frameState.reason;
+
+      const justHit = frameState.hit && !this.previousTargetHits[id];
+      if (justHit) {
+        const snapshot = targetObject.toSnapshot();
+        const local = this.toLocal(snapshot.position);
+        const color = colorToDisplayColor(frameState.bestColor ?? snapshot.acceptedColors[0] ?? 'white');
+        HitSpark.spawn(this.effectRoot, local.x, local.y, color, snapshot.radius + 10);
+        this.audio.play(SoundKeys.RayHitTarget);
+      }
+
+      const justCompleted = runtime.completed && !wasCompleted;
+      if (justCompleted) {
+        const snapshot = targetObject.toSnapshot();
+        const local = this.toLocal(snapshot.position);
+        HitSpark.spawn(this.effectRoot, local.x, local.y, colorToDisplayColor(frameState.bestColor ?? 'white'), snapshot.radius + 16);
+        this.audio.play(SoundKeys.TargetCharge);
+      }
+
+      targetObject.setRuntimeState({
+        hit: frameState.hit,
+        completed: runtime.completed,
+        colorMatched: frameState.colorMatched,
+        intensityEnough: frameState.intensityEnough,
+        chargeRatio: clamp(runtime.charge / Math.max(chargeTime, 0.001), 0, 1),
+        reason: frameState.reason,
+      });
+
+      this.previousTargetHits[id] = frameState.hit;
+      this.previousTargetCompleted[id] = runtime.completed;
+    });
+
+    requiredTargets.forEach((target) => {
+      const runtime = this.runtimeTargetStates.get(target.id);
+      if (!runtime) {
+        return;
+      }
+      if (runtime.completed) {
+        completedCount += 1;
+      }
+      energyRatioTotal += clamp(runtime.charge / Math.max(runtime.chargeTime, 0.001), 0, 1);
+    });
+
+    const energyPercent = requiredTargets.length
+      ? Math.round((energyRatioTotal / requiredTargets.length) * 100)
+      : 100;
+    this.hud.setTargetSummary(completedCount, requiredTargets.length, energyPercent);
+
+    const reason = this.resolveFailureReason(requiredTargets, frameStates, hits);
+    if (reason && reason !== this.lastFailureReason) {
+      this.hud.showFailureReason(reason, 1500);
+      this.lastFailureReason = reason;
+    }
+    if (!reason) {
+      this.lastFailureReason = '';
+    }
+
+    if (!this.clearShowing && requiredTargets.length > 0 && completedCount === requiredTargets.length) {
+      this.handleLevelClear(energyPercent);
+    }
   }
 
-  private buildSolveWorld(level: LevelConfig): SolveWorld {
+  private buildFrameTargetStates(level: LevelConfig, result: SolverResultLike) {
+    const stateMap = new Map<string, TargetFrameState>();
+    const targetHits = this.extractHits(result).filter((hit) => hit.type === 'target');
+    const solverTargetStates = result.targetStates ?? {};
+    const legacyTargetHits = result.targetHits ?? {};
+
+    level.targets.forEach((target) => {
+      const solverState = solverTargetStates[target.id];
+      const legacyState = legacyTargetHits[target.id];
+      const acceptedColors = target.acceptedColors ?? [];
+      const targetEvents = targetHits.filter((hit) => hit.objectId === target.id);
+
+      let hit = false;
+      let colorMatched = false;
+      let intensityEnough = false;
+      let bestIntensity = 0;
+      let bestColor: SolverColor | undefined;
+      let reason: TargetFrameState['reason'] = 'not_hit';
+
+      if (solverState) {
+        hit = Boolean(solverState.hit ?? solverState.completed ?? false);
+        colorMatched = Boolean(solverState.colorMatched ?? solverState.completed ?? false);
+        intensityEnough = Boolean(solverState.intensityEnough ?? solverState.completed ?? false);
+        bestIntensity = Number(solverState.bestIntensity ?? solverState.intensity ?? 0);
+        bestColor = solverState.bestColor ?? solverState.color;
+        reason = solverState.reason ?? (hit ? (colorMatched ? (intensityEnough ? 'none' : 'low_intensity') : 'wrong_color') : 'not_hit');
+      } else if (legacyState) {
+        hit = Boolean(legacyState.hit);
+        bestIntensity = Number(legacyState.intensity ?? 0);
+        bestColor = legacyState.color;
+        colorMatched = hit;
+        intensityEnough = hit;
+        reason = hit ? 'none' : 'not_hit';
+      }
+
+      if (!hit && targetEvents.length > 0) {
+        hit = true;
+      }
+      if (targetEvents.length > 0) {
+        const strongest = targetEvents.reduce((best, current) => (current.intensity > best.intensity ? current : best));
+        bestIntensity = Math.max(bestIntensity, strongest.intensity);
+        bestColor = strongest.color;
+        colorMatched = acceptedColors.includes(strongest.color);
+        intensityEnough = strongest.intensity >= target.requiredIntensity;
+        reason = colorMatched ? (intensityEnough ? 'none' : 'low_intensity') : 'wrong_color';
+      }
+
+      if (!hit) {
+        reason = 'not_hit';
+      } else if (!colorMatched) {
+        reason = 'wrong_color';
+      } else if (!intensityEnough) {
+        reason = 'low_intensity';
+      } else {
+        reason = 'none';
+      }
+
+      stateMap.set(target.id, {
+        targetId: target.id,
+        hit,
+        colorMatched,
+        intensityEnough,
+        bestIntensity,
+        bestColor,
+        reason,
+      });
+    });
+
+    return stateMap;
+  }
+
+  private resolveFailureReason(
+    requiredTargets: TargetConfig[],
+    frameStates: Map<string, TargetFrameState>,
+    hits: SolveHitLike[],
+  ) {
+    if (!requiredTargets.length) {
+      return '';
+    }
+    const pending = requiredTargets.filter((target) => !this.runtimeTargetStates.get(target.id)?.completed);
+    if (!pending.length) {
+      return '';
+    }
+    if (pending.some((target) => frameStates.get(target.id)?.reason === 'wrong_color')) {
+      return '颜色不匹配';
+    }
+    if (pending.some((target) => frameStates.get(target.id)?.reason === 'low_intensity')) {
+      return '光强不足';
+    }
+    if (hits.some((hit) => hit.type === 'obstacle')) {
+      return '光线被阻挡';
+    }
+    return '需要点亮全部目标';
+  }
+
+  private extractHits(result: SolverResultLike) {
+    const raw = result.hits ?? result.impacts ?? [];
+    return raw.filter((hit): hit is SolveHitLike => Boolean(hit && hit.point && hit.type));
+  }
+
+  private buildSolveWorld(level: LevelConfig) {
     return {
       bounds: {
         x: PLAY_AREA_RECT.x,
@@ -834,7 +1109,7 @@ export class GameApp extends Component {
   }
 
   private getRecommendedLevelIndex() {
-    const firstUncleared = levels.findIndex((level) => !this.gameState.isCleared(level.id));
+    const firstUncleared = levels.findIndex((level) => !this.gameState.isCleared(String(level.id)));
     return firstUncleared >= 0 ? firstUncleared : levels.length - 1;
   }
 

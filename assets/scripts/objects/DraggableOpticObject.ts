@@ -1,10 +1,18 @@
 import { _decorator, Color, Component, Graphics, Label, Node, tween, UITransform, Vec2, Vec3 } from 'cc';
-import { ANGLE_SNAP_DEGREES, DESIGN_HEIGHT, DESIGN_WIDTH, DRAG_SCALE, INVALID_TINT, PANEL_BORDER, UI_SUBTEXT } from '../core/Constants';
+import { ANGLE_SNAP_DEGREES, DRAG_SCALE, INVALID_TINT, PANEL_BORDER, UI_SUBTEXT } from '../core/Constants';
+import { PlayfieldTransform } from '../core/PlayfieldTransform';
 import { snapAngle } from '../utils/MathUtils';
 
 const { ccclass } = _decorator;
 
-export type InteractionMode = 'idle' | 'drag' | 'rotate' | 'invalid';
+export type InteractionMode =
+  | 'idle'
+  | 'pressing'
+  | 'dragging'
+  | 'rotating'
+  | 'invalid'
+  | 'drag'
+  | 'rotate';
 
 @ccclass('DraggableOpticObject')
 export abstract class DraggableOpticObject extends Component {
@@ -42,7 +50,8 @@ export abstract class DraggableOpticObject extends Component {
 
   applyDesignPosition(position: Vec2) {
     this.designPosition = position.clone();
-    this.node.setPosition(new Vec3(position.x - DESIGN_WIDTH * 0.5, position.y - DESIGN_HEIGHT * 0.5, 0));
+    const ui = PlayfieldTransform.playfieldToUi(position);
+    this.node.setPosition(new Vec3(ui.x, ui.y, 0));
   }
 
   getDesignPosition() {
@@ -80,12 +89,13 @@ export abstract class DraggableOpticObject extends Component {
   }
 
   setInteractionMode(mode: InteractionMode) {
-    if (this.interactionMode === mode) {
+    const nextMode = this.normalizeInteractionMode(mode);
+    if (this.interactionMode === nextMode) {
       return;
     }
-    this.interactionMode = mode;
+    this.interactionMode = nextMode;
     tween(this.node).stop();
-    const targetScale = mode === 'idle' ? 1 : DRAG_SCALE;
+    const targetScale = nextMode === 'idle' ? 1 : DRAG_SCALE;
     tween(this.node)
       .to(0.12, { scale: new Vec3(targetScale, targetScale, 1) })
       .start();
@@ -94,10 +104,11 @@ export abstract class DraggableOpticObject extends Component {
 
   animateToDesignPosition(position: Vec2, duration = 0.14) {
     this.designPosition = position.clone();
+    const ui = PlayfieldTransform.playfieldToUi(position);
     tween(this.node).stop();
     tween(this.node)
       .to(duration, {
-        position: new Vec3(position.x - DESIGN_WIDTH * 0.5, position.y - DESIGN_HEIGHT * 0.5, 0),
+        position: new Vec3(ui.x, ui.y, 0),
       })
       .start();
   }
@@ -214,6 +225,16 @@ export abstract class DraggableOpticObject extends Component {
 
   protected supportsRingRotation() {
     return true;
+  }
+
+  private normalizeInteractionMode(mode: InteractionMode): Exclude<InteractionMode, 'drag' | 'rotate'> {
+    if (mode === 'drag') {
+      return 'dragging';
+    }
+    if (mode === 'rotate') {
+      return 'rotating';
+    }
+    return mode;
   }
 
   abstract getTouchRadius(): number;

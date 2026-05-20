@@ -2,10 +2,10 @@ import { EventTouch, Node, Rect, UITransform, Vec2, Vec3 } from 'cc';
 import { AudioManager } from '../audio/AudioManager';
 import { SoundKeys } from '../audio/SoundKeys';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/Constants';
-import { clamp } from '../utils/MathUtils';
-import { angleFromPoints } from '../utils/MathUtils';
-import { DragSession } from './InputTypes';
+import { PlayfieldTransform } from '../core/PlayfieldTransform';
 import { DraggableOpticObject } from '../objects/DraggableOpticObject';
+import { angleFromPoints, clamp } from '../utils/MathUtils';
+import { DragSession } from './InputTypes';
 
 interface DragRotateCallbacks {
   onSelectionChanged: (object: DraggableOpticObject | null) => void;
@@ -18,6 +18,7 @@ export class DragRotateController {
   private session: DragSession | null = null;
   private readonly rootTransform: UITransform;
   private lastRotateStep = NaN;
+  private readonly dragStartThreshold = 4;
 
   constructor(
     private readonly root: Node,
@@ -28,6 +29,12 @@ export class DragRotateController {
     private readonly callbacks: DragRotateCallbacks,
   ) {
     this.rootTransform = this.root.getComponent(UITransform)!;
+    PlayfieldTransform.configureContext({
+      rootTransform: this.rootTransform,
+      playfieldRect: this.playAreaRect,
+      designWidth: DESIGN_WIDTH,
+      designHeight: DESIGN_HEIGHT,
+    });
     this.root.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
     this.root.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
     this.root.on(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
@@ -64,7 +71,7 @@ export class DragRotateController {
       return false;
     }
     this.selection.elevate();
-    this.selection.setInteractionMode('rotate');
+    this.selection.setInteractionMode('rotating');
     this.selection.applyAngle(this.selection.getAngle() + deltaDegrees);
     this.lastRotateStep = this.selection.getAngle();
     this.audio.play(SoundKeys.ObjectRotate);
@@ -86,21 +93,44 @@ export class DragRotateController {
     this.root.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
     this.root.off(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
     this.blankTapNode.off(Node.EventType.TOUCH_END, this.onBlankTap, this);
+    PlayfieldTransform.setRootTransform(null);
   }
 
   private onObjectTouchStart(object: DraggableOpticObject, event: EventTouch) {
+    if (this.session) {
+      return;
+    }
     const local = this.toNodeLocal(object.node, event);
-    const mode = object.resolveTouchMode(local);
     this.setSelection(object);
+    const mode = object.resolveTouchMode(local);
     if (!mode) {
       return;
     }
-    this.session = { object, mode, dragOffset: mode === 'drag' ? new Vec2(local.x, local.y) : undefined };
+
+    const pressStartPlayfieldPos = this.eventToPlayfield(event);
+    const objectStartPos = object.getDesignPosition();
+    const objectStartAngle = object.getAngle();
+    const startTouchAngle = angleFromPoints(objectStartPos, pressStartPlayfieldPos);
+    this.session = {
+      object,
+      mode: mode === 'rotate' ? 'rotating' : 'pressing',
+      pressStartPlayfieldPos,
+      objectStartPos,
+      objectStartAngle,
+      startTouchAngle,
+      lastValidPos: object.getLastValidPosition(),
+      startedFromInventory: object.isInInventory(),
+      isCurrentPlacementValid: true,
+    };
+
     object.elevate();
-    object.setInteractionMode(mode);
-    this.audio.play(mode === 'rotate' ? SoundKeys.Rotate : SoundKeys.DragStart);
     if (mode === 'rotate') {
+      object.setInteractionMode('rotating');
       this.lastRotateStep = object.getAngle();
+      this.audio.play(SoundKeys.Rotate);
+    } else {
+      object.setInteractionMode('pressing');
+      this.audio.play(SoundKeys.DragStart);
     }
   }
 
@@ -109,40 +139,25 @@ export class DragRotateController {
       return;
     }
     const session = this.session;
-    if (session.mode === 'drag') {
-      const local = this.toRootLocal(event);
-      const unclamped = new Vec2(
-        local.x + DESIGN_WIDTH * 0.5 - (session.dragOffset?.x ?? 0),
-        local.y + DESIGN_HEIGHT * 0.5 - (session.dragOffset?.y ?? 0),
-      );
-      const radius = session.object.getTouchRadius();
-      const draggingFromInventory = session.object.isInInventory();
-      const design = draggingFromInventory
-        ? this.clampToCanvas(unclamped, radius)
-        : this.clampToPlayArea(unclamped, radius);
+    const currentTouch = this.eventToPlayfield(event);
 
-      session.object.applyDesignPosition(design);
-      const outOfBounds = !draggingFromInventory && (design.x !== unclamped.x || design.y !== unclamped.y);
-      const insidePlayArea = this.isInsidePlayArea(design, radius);
-      const blocked = insidePlayArea && this.isBlocked(design, radius);
-      session.invalid = outOfBounds || blocked;
-      session.object.setInteractionMode(session.invalid ? 'invalid' : 'drag');
-      if (!session.invalid && !draggingFromInventory) {
-        session.object.recordValidPosition();
+    if (session.mode === 'pressing') {
+      const distance = currentTouch.clone().subtract(session.pressStartPlayfieldPos).length();
+      if (distance < this.dragStartThreshold) {
+        return;
       }
-      this.audio.play(SoundKeys.DragMove);
-      this.callbacks.onWorldChanged();
+      session.mode = 'dragging';
+      session.object.setInteractionMode('dragging');
+    }
+
+    if (session.mode === 'dragging') {
+      this.updateDragging(session, currentTouch);
       return;
     }
-    const center = session.object.node.position;
-    const local = this.toRootLocal(event);
-    const angle = angleFromPoints(new Vec2(center.x, center.y), new Vec2(local.x, local.y));
-    session.object.applyAngle(angle);
-    if (session.object.getAngle() !== this.lastRotateStep) {
-      this.lastRotateStep = session.object.getAngle();
-      this.audio.play(SoundKeys.Rotate);
+
+    if (session.mode === 'rotating') {
+      this.updateRotating(session, currentTouch);
     }
-    this.callbacks.onWorldChanged();
   }
 
   private onTouchEnd() {
@@ -150,48 +165,15 @@ export class DragRotateController {
       return;
     }
     const session = this.session;
-    if (session.mode === 'drag') {
-      const radius = session.object.getTouchRadius();
-      const draggingFromInventory = session.object.isInInventory();
-
-      if (draggingFromInventory) {
-        const placement = session.object.getDesignPosition();
-        const canPlace = this.isInsidePlayArea(placement, radius) && !this.isBlocked(placement, radius);
-        if (!canPlace) {
-          session.object.setInteractionMode('invalid');
-          session.object.animateToDesignPosition(session.object.getInventoryAnchor(), 0.16);
-          this.audio.play(SoundKeys.InvalidAction);
-          this.callbacks.onSelectionChanged(session.object);
-          setTimeout(() => {
-            this.callbacks.onWorldChanged();
-          }, 170);
-          session.object.setInteractionMode('idle');
-          this.session = null;
-          this.callbacks.onWorldChanged();
-          return;
-        }
-        const clamped = this.clampToPlayArea(placement, radius);
-        session.object.applyDesignPosition(clamped);
-        session.object.recordValidPosition();
-        session.object.setInventoryState(false);
-        this.callbacks.onSelectionChanged(session.object);
-      }
-
-      if (session.invalid) {
-        session.object.setInteractionMode('invalid');
-        session.object.animateToDesignPosition(session.object.getLastValidPosition(), 0.12);
-        this.audio.play(SoundKeys.InvalidAction);
-        setTimeout(() => {
-          this.callbacks.onWorldChanged();
-        }, 130);
-      }
+    if (session.mode === 'dragging') {
+      this.finishDragging(session);
+    } else if (session.mode === 'rotating') {
       session.object.setInteractionMode('idle');
-      if (!session.invalid) {
-        this.audio.play(SoundKeys.ObjectDrop);
-      }
+      this.callbacks.onSelectionChanged(session.object);
     } else {
       session.object.setInteractionMode('idle');
     }
+
     this.session = null;
     this.callbacks.onWorldChanged();
   }
@@ -203,9 +185,101 @@ export class DragRotateController {
     this.clearSelection();
   }
 
-  private toRootLocal(event: EventTouch) {
+  private updateDragging(session: DragSession, currentTouch: Vec2) {
+    const delta = currentTouch.clone().subtract(session.pressStartPlayfieldPos);
+    const unclamped = session.objectStartPos.clone().add(delta);
+    const radius = session.object.getTouchRadius();
+
+    if (session.startedFromInventory) {
+      const inCanvas = this.clampToCanvas(unclamped, radius);
+      session.object.applyDesignPosition(inCanvas);
+      const insidePlayfield = PlayfieldTransform.isInsidePlayfield(inCanvas, radius);
+      const blocked = insidePlayfield && this.isBlocked(inCanvas, radius);
+      session.isCurrentPlacementValid = insidePlayfield && !blocked;
+      session.object.setInteractionMode(session.isCurrentPlacementValid ? 'dragging' : 'invalid');
+    } else {
+      const clamped = PlayfieldTransform.clampToPlayfield(unclamped, radius);
+      const outOfBounds = clamped.x !== unclamped.x || clamped.y !== unclamped.y;
+      const blocked = this.isBlocked(clamped, radius);
+      session.isCurrentPlacementValid = !outOfBounds && !blocked;
+      session.object.applyDesignPosition(clamped);
+      session.object.setInteractionMode(session.isCurrentPlacementValid ? 'dragging' : 'invalid');
+      if (session.isCurrentPlacementValid) {
+        session.lastValidPos = clamped.clone();
+        session.object.recordValidPosition();
+      }
+    }
+
+    this.audio.play(SoundKeys.DragMove);
+    this.callbacks.onWorldChanged();
+  }
+
+  private updateRotating(session: DragSession, currentTouch: Vec2) {
+    const center = session.object.getDesignPosition();
+    const touchAngle = angleFromPoints(center, currentTouch);
+    const angleDelta = this.normalizeAngleDelta(touchAngle - session.startTouchAngle);
+    session.object.applyAngle(session.objectStartAngle + angleDelta);
+    if (session.object.getAngle() !== this.lastRotateStep) {
+      this.lastRotateStep = session.object.getAngle();
+      this.audio.play(SoundKeys.Rotate);
+    }
+    this.callbacks.onSelectionChanged(session.object);
+    this.callbacks.onWorldChanged();
+  }
+
+  private finishDragging(session: DragSession) {
+    const object = session.object;
+    const radius = object.getTouchRadius();
+
+    if (session.startedFromInventory) {
+      const placement = object.getDesignPosition();
+      const canPlace = PlayfieldTransform.isInsidePlayfield(placement, radius) && !this.isBlocked(placement, radius);
+      if (!canPlace) {
+        object.setInteractionMode('invalid');
+        object.animateToDesignPosition(object.getInventoryAnchor(), 0.16);
+        object.setInventoryState(true);
+        this.audio.play(SoundKeys.InvalidAction);
+        this.callbacks.onSelectionChanged(object);
+        setTimeout(() => {
+          object.setInteractionMode('idle');
+          this.callbacks.onWorldChanged();
+        }, 170);
+        return;
+      }
+
+      const clamped = PlayfieldTransform.clampToPlayfield(placement, radius);
+      object.applyDesignPosition(clamped);
+      object.recordValidPosition();
+      object.setInventoryState(false);
+      object.setInteractionMode('idle');
+      this.audio.play(SoundKeys.ObjectDrop);
+      this.callbacks.onSelectionChanged(object);
+      return;
+    }
+
+    const placement = object.getDesignPosition();
+    const stillValid = PlayfieldTransform.isInsidePlayfield(placement, radius)
+      && !this.isBlocked(placement, radius)
+      && session.isCurrentPlacementValid;
+    if (!stillValid) {
+      object.setInteractionMode('invalid');
+      object.animateToDesignPosition(session.lastValidPos, 0.12);
+      this.audio.play(SoundKeys.InvalidAction);
+      setTimeout(() => {
+        object.setInteractionMode('idle');
+        this.callbacks.onWorldChanged();
+      }, 130);
+      return;
+    }
+
+    object.recordValidPosition();
+    object.setInteractionMode('idle');
+    this.audio.play(SoundKeys.ObjectDrop);
+  }
+
+  private eventToPlayfield(event: EventTouch) {
     const ui = event.getUILocation();
-    return this.rootTransform.convertToNodeSpaceAR(new Vec3(ui.x, ui.y, 0));
+    return PlayfieldTransform.screenToPlayfield(new Vec2(ui.x, ui.y));
   }
 
   private toNodeLocal(node: Node, event: EventTouch) {
@@ -214,26 +288,10 @@ export class DragRotateController {
     return transform.convertToNodeSpaceAR(new Vec3(ui.x, ui.y, 0));
   }
 
-  private clampToPlayArea(position: Vec2, radius: number) {
-    return new Vec2(
-      clamp(position.x, this.playAreaRect.x + radius, this.playAreaRect.x + this.playAreaRect.width - radius),
-      clamp(position.y, this.playAreaRect.y + radius, this.playAreaRect.y + this.playAreaRect.height - radius),
-    );
-  }
-
   private clampToCanvas(position: Vec2, radius: number) {
     return new Vec2(
       clamp(position.x, radius, DESIGN_WIDTH - radius),
       clamp(position.y, radius, DESIGN_HEIGHT - radius),
-    );
-  }
-
-  private isInsidePlayArea(position: Vec2, radius: number) {
-    return (
-      position.x >= this.playAreaRect.x + radius &&
-      position.x <= this.playAreaRect.x + this.playAreaRect.width - radius &&
-      position.y >= this.playAreaRect.y + radius &&
-      position.y <= this.playAreaRect.y + this.playAreaRect.height - radius
     );
   }
 
@@ -245,5 +303,15 @@ export class DragRotateController {
       const top = zone.y + zone.height + radius;
       return position.x >= left && position.x <= right && position.y >= bottom && position.y <= top;
     });
+  }
+
+  private normalizeAngleDelta(delta: number) {
+    let normalized = delta % 360;
+    if (normalized > 180) {
+      normalized -= 360;
+    } else if (normalized < -180) {
+      normalized += 360;
+    }
+    return normalized;
   }
 }
