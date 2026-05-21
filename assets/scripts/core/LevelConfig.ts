@@ -20,6 +20,7 @@ export interface MirrorConfig {
   length: number;
   movable: boolean;
   rotatable: boolean;
+  startsInInventory?: boolean;
   moveBounds?: RectLike;
   reflectivity?: number;
 }
@@ -33,10 +34,24 @@ export interface PrismConfig {
   size: number;
   movable: boolean;
   rotatable: boolean;
+  startsInInventory?: boolean;
   moveBounds?: RectLike;
   dispersion: number;
   dispersionAngle?: number;
   throughput?: number;
+}
+
+export interface LevelSolutionPlacement {
+  id: string;
+  x: number;
+  y: number;
+  angle: number;
+  inInventory?: boolean;
+}
+
+export interface LevelSolution {
+  mirrors?: LevelSolutionPlacement[];
+  prisms?: LevelSolutionPlacement[];
 }
 
 export interface TargetConfig {
@@ -85,4 +100,5 @@ export interface LevelConfig {
   obstacles: ObstacleConfig[];
   rules: LevelRules;
   recommendedSolution?: string;
+  solution?: LevelSolution;
 }

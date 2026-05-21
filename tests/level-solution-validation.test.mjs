@@ -81,8 +81,48 @@ const loadRuntime = () => {
   return { constants, levels, RaySolver };
 };
 
-const buildWorld = (level, constants) => {
+const buildPlacedMirrors = (level, placements = []) => {
+  const byId = new Map(placements.map((placement) => [placement.id, placement]));
+  return (level.mirrors ?? []).flatMap((mirror) => {
+    const placement = byId.get(mirror.id);
+    const inInventory = placement?.inInventory ?? mirror.startsInInventory ?? false;
+    if (inInventory) {
+      return [];
+    }
+    return [{
+      id: mirror.id,
+      position: toVec2(placement?.x ?? mirror.x, placement?.y ?? mirror.y),
+      angle: placement?.angle ?? mirror.angle,
+      length: mirror.length,
+      reflectivity: mirror.reflectivity ?? 0.92,
+    }];
+  });
+};
+
+const buildPlacedPrisms = (level, placements = []) => {
+  const byId = new Map(placements.map((placement) => [placement.id, placement]));
+  return (level.prisms ?? []).flatMap((prism) => {
+    const placement = byId.get(prism.id);
+    const inInventory = placement?.inInventory ?? prism.startsInInventory ?? false;
+    if (inInventory) {
+      return [];
+    }
+    return [{
+      id: prism.id,
+      position: toVec2(placement?.x ?? prism.x, placement?.y ?? prism.y),
+      angle: placement?.angle ?? prism.angle,
+      size: prism.size,
+      dispersion: prism.dispersion ?? prism.dispersionAngle ?? 12,
+      dispersionAngle: prism.dispersionAngle,
+      throughput: prism.throughput ?? 0.82,
+    }];
+  });
+};
+
+const buildWorld = (level, constants, solution = null) => {
   const playArea = constants.PLAY_AREA_RECT;
+  const mirrorPlacements = solution?.mirrors ?? [];
+  const prismPlacements = solution?.prisms ?? [];
   return {
     bounds: {
       x: playArea.x,
@@ -105,25 +145,8 @@ const buildWorld = (level, constants) => {
       intensity: source.intensity ?? 1,
       beamWidth: source.beamWidth ?? 8,
     })),
-    mirrors: (level.mirrors ?? [])
-      .filter((mirror) => !mirror.startsInInventory)
-      .map((mirror) => ({
-        id: mirror.id,
-        position: toVec2(mirror.x, mirror.y),
-        angle: mirror.angle,
-        length: mirror.length,
-        reflectivity: mirror.reflectivity ?? 0.92,
-      })),
-    prisms: (level.prisms ?? [])
-      .filter((prism) => !prism.startsInInventory)
-      .map((prism) => ({
-        id: prism.id,
-        position: toVec2(prism.x, prism.y),
-        angle: prism.angle,
-        size: prism.size,
-        dispersion: prism.dispersion ?? prism.dispersionAngle ?? 12,
-        throughput: prism.throughput ?? 0.82,
-      })),
+    mirrors: buildPlacedMirrors(level, mirrorPlacements),
+    prisms: buildPlacedPrisms(level, prismPlacements),
     targets: (level.targets ?? []).map((target) => ({
       id: target.id,
       position: toVec2(target.x, target.y),
@@ -137,41 +160,50 @@ const buildWorld = (level, constants) => {
       position: toVec2(obstacle.x, obstacle.y),
       width: obstacle.width,
       height: obstacle.height,
+      angle: obstacle.angle,
     })),
   };
 };
 
-const isClearedFromResult = (result, level) => {
-  if (typeof result?.cleared === 'boolean') {
-    return result.cleared;
-  }
-  const required = (level.targets ?? []).filter((target) => target.required ?? true);
-  if (result?.targetStates) {
-    return required.every((target) => Boolean(result.targetStates[target.id]?.completed));
-  }
-  if (result?.targetHits) {
-    return required.every((target) => Boolean(result.targetHits[target.id]?.hit));
-  }
-  return false;
-};
-
-test('levels should contain 8 mechanism validation stages', () => {
-  const { levels } = loadRuntime();
-  assert.equal(levels.length, 8, 'levels.ts should contain exactly 8 levels for mechanism validation');
-});
-
-test('initial runtime clear state: all 8 levels must not clear', () => {
+test('levels expose solvable runtime solutions for all 8 stages', () => {
   const { levels, constants, RaySolver } = loadRuntime();
-  assert.equal(levels.length, 8, 'this validation expects 8 levels');
+  assert.equal(levels.length, 8, 'levels.ts should contain exactly 8 levels');
 
   const solver = new RaySolver();
-  const initialClears = levels.map((level) => {
-    const world = buildWorld(level, constants);
-    const result = solver.solve(world);
-    return isClearedFromResult(result, level);
-  });
+  levels.forEach((level, index) => {
+    assert.ok(level.solution, `level ${index + 1} should define solution data`);
 
-  initialClears.forEach((cleared, index) => {
-    assert.equal(cleared, false, `level ${index + 1} should not be cleared in initial state`);
+    const initialResult = solver.solve(buildWorld(level, constants));
+    assert.equal(initialResult.cleared, false, `level ${index + 1} should not clear from its initial state`);
+
+    const solvedResult = solver.solve(buildWorld(level, constants, level.solution));
+    assert.equal(solvedResult.cleared, true, `level ${index + 1} should clear after applying solution`);
+
+    const requiredTargets = (level.targets ?? []).filter((target) => target.required ?? true);
+    requiredTargets.forEach((target) => {
+      assert.equal(
+        Boolean(solvedResult.targetStates?.[target.id]?.completed),
+        true,
+        `level ${index + 1} target ${target.id} should complete after applying solution`,
+      );
+    });
+
+    const segments = solvedResult.rays ?? solvedResult.segments ?? [];
+    assert.ok(segments.length >= 1, `level ${index + 1} should produce at least one ray segment`);
+
+    if (requiredTargets.length >= 2) {
+      const completedRequired = requiredTargets.filter((target) => solvedResult.targetStates?.[target.id]?.completed).length;
+      assert.equal(
+        completedRequired,
+        requiredTargets.length,
+        `level ${index + 1} should complete all required targets`,
+      );
+    }
+
+    if ((level.prisms ?? []).length > 0) {
+      const emittedColors = new Set(segments.map((segment) => segment.color));
+      const hasSplitColor = ['red', 'green', 'blue'].some((color) => emittedColors.has(color));
+      assert.equal(hasSplitColor, true, `level ${index + 1} should emit colored rays after prism split`);
+    }
   });
 });

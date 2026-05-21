@@ -19,6 +19,10 @@ export interface HUDDebugMetrics {
   recomputeMs: number;
 }
 
+interface GameHUDOptions {
+  enableDiagnostics?: boolean;
+}
+
 export class GameHUD {
   public readonly node: Node;
   private readonly titleLabel: Label;
@@ -27,7 +31,7 @@ export class GameHUD {
   private readonly angleLabel: Label;
   private readonly levelHintLabel: Label;
   private readonly hintLabel: Label;
-  private readonly debugLabel: Label;
+  private readonly debugLabel: Label | null;
   private readonly reasonLabel: Label;
   private reasonTimer: ReturnType<typeof setTimeout> | null = null;
   private debugMetrics: HUDDebugMetrics = {
@@ -37,7 +41,7 @@ export class GameHUD {
     recomputeMs: 0,
   };
 
-  constructor(layer: number, callbacks: GameHUDCallbacks) {
+  constructor(layer: number, callbacks: GameHUDCallbacks, options: GameHUDOptions = {}) {
     this.node = new Node('GameHUD');
     this.node.layer = layer;
     this.node.addComponent(UITransform).setContentSize(390, 844);
@@ -155,26 +159,30 @@ export class GameHUD {
     this.hintLabel = makeLabel(info.node, layer, '从下方道具栏拖入，再用手指外圈拖动调整角度。', 12, UI_SUBTEXT, new Vec3(0, -34, 0), 308, 30, 'center');
     this.hintLabel.enableWrapText = true;
 
-    const debugPanel = createGlassPanelNode('DebugPanel', layer, 168, 72, {
-      radius: 18,
-      fillColor: new Color(12, 24, 44, 198),
-      strokeColor: new Color(136, 184, 242, 110),
-      glowColor: new Color(92, 152, 228, 24),
-    });
-    debugPanel.node.parent = this.node;
-    debugPanel.node.setPosition(104, 208, 0);
-    this.debugLabel = makeLabel(
-      debugPanel.node,
-      layer,
-      '',
-      11,
-      new Color(184, 210, 238, 255),
-      new Vec3(0, 0, 0),
-      150,
-      58,
-      'left',
-    );
-    this.debugLabel.enableWrapText = true;
+    if (options.enableDiagnostics) {
+      const debugPanel = createGlassPanelNode('DebugPanel', layer, 168, 72, {
+        radius: 18,
+        fillColor: new Color(12, 24, 44, 198),
+        strokeColor: new Color(136, 184, 242, 110),
+        glowColor: new Color(92, 152, 228, 24),
+      });
+      debugPanel.node.parent = this.node;
+      debugPanel.node.setPosition(104, 208, 0);
+      this.debugLabel = makeLabel(
+        debugPanel.node,
+        layer,
+        '',
+        11,
+        new Color(184, 210, 238, 255),
+        new Vec3(0, 0, 0),
+        150,
+        58,
+        'left',
+      );
+      this.debugLabel.enableWrapText = true;
+    } else {
+      this.debugLabel = null;
+    }
     this.refreshDebugMetrics();
   }
 
@@ -238,6 +246,9 @@ export class GameHUD {
   }
 
   private refreshDebugMetrics() {
+    if (!this.debugLabel) {
+      return;
+    }
     const recomputeMs = Number.isFinite(this.debugMetrics.recomputeMs)
       ? this.debugMetrics.recomputeMs.toFixed(2)
       : '--';

@@ -28,7 +28,25 @@ export const normalizeSafe = (vector: Vec2) => {
 
 export const angleFromPoints = (from: Vec2, to: Vec2) => radToDeg(Math.atan2(to.y - from.y, to.x - from.x));
 
-export const snapAngle = (degrees: number, snap: number) => Math.round(degrees / snap) * snap;
+const normalizeDegrees = (degrees: number) => {
+  let normalized = degrees % 360;
+  if (normalized > 180) {
+    normalized -= 360;
+  }
+  if (normalized <= -180) {
+    normalized += 360;
+  }
+  return normalized;
+};
+
+const angleDistance = (left: number, right: number) => Math.abs(normalizeDegrees(left - right));
+
+export const snapAngle = (degrees: number, snap: number) => {
+  const base = Math.round(degrees / snap) * snap;
+  const majorAngles = [0, 45, 90, 135, 180, -45, -90, -135, -180];
+  const magnetTarget = majorAngles.find((major) => angleDistance(degrees, major) <= 4);
+  return magnetTarget ?? normalizeDegrees(base);
+};
 
 export const average = (a: number, b: number) => (a + b) * 0.5;
 

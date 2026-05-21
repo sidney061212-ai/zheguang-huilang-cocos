@@ -1,5 +1,6 @@
 import { _decorator, Color, Component, Graphics, Label, Node, tween, UITransform, Vec2, Vec3 } from 'cc';
 import { ANGLE_SNAP_DEGREES, DRAG_SCALE, INVALID_TINT, PANEL_BORDER, UI_SUBTEXT } from '../core/Constants';
+import { RectLike } from '../core/LightTypes';
 import { PlayfieldTransform } from '../core/PlayfieldTransform';
 import { snapAngle } from '../utils/MathUtils';
 
@@ -29,6 +30,7 @@ export abstract class DraggableOpticObject extends Component {
   private angleLabelNode: Node | null = null;
   private inInventory = false;
   private inventoryAnchor = new Vec2();
+  private moveBounds: RectLike | null = null;
 
   onLoad() {
     this.node.layer = 33554432;
@@ -102,6 +104,14 @@ export abstract class DraggableOpticObject extends Component {
     this.refreshVisual();
   }
 
+  playDropFeedback() {
+    tween(this.node).stop();
+    tween(this.node)
+      .to(0.08, { scale: new Vec3(1.04, 1.04, 1) })
+      .to(0.1, { scale: new Vec3(1, 1, 1) })
+      .start();
+  }
+
   animateToDesignPosition(position: Vec2, duration = 0.14) {
     this.designPosition = position.clone();
     const ui = PlayfieldTransform.playfieldToUi(position);
@@ -160,6 +170,28 @@ export abstract class DraggableOpticObject extends Component {
     return this.inventoryAnchor.clone();
   }
 
+  setMoveBounds(bounds?: RectLike | null) {
+    this.moveBounds = bounds
+      ? {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+      }
+      : null;
+  }
+
+  getMoveBounds() {
+    return this.moveBounds
+      ? {
+        x: this.moveBounds.x,
+        y: this.moveBounds.y,
+        width: this.moveBounds.width,
+        height: this.moveBounds.height,
+      }
+      : null;
+  }
+
   protected refreshVisual() {
     const graphics = this.node.getComponent(Graphics)!;
     graphics.clear();
@@ -190,6 +222,9 @@ export abstract class DraggableOpticObject extends Component {
   protected getTintColor() {
     if (this.interactionMode === 'invalid') {
       return INVALID_TINT;
+    }
+    if (this.interactionMode === 'dragging' || this.interactionMode === 'rotating' || this.interactionMode === 'pressing') {
+      return new Color(226, 240, 255, 255);
     }
     return this.selected ? PANEL_BORDER : new Color(255, 255, 255, 255);
   }

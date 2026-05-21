@@ -129,7 +129,7 @@ const colorToDisplayColor = (color: SolverColor) => {
 
 @ccclass('GameApp')
 export class GameApp extends Component {
-  private readonly enableDiagnostics = false;
+  public static enableDiagnostics = false;
   private readonly coordinateSystem = new CoordinateSystem();
   private readonly gameState = new GameState();
   private readonly solver = new RaySolver();
@@ -274,7 +274,7 @@ export class GameApp extends Component {
 
   private buildDiagnostics() {
     this.clearLayer(this.diagnosticRoot);
-    if (!this.enableDiagnostics) {
+    if (!GameApp.enableDiagnostics) {
       this.debugLabel = null;
       return;
     }
@@ -485,6 +485,8 @@ export class GameApp extends Component {
       onRotateLeft: () => this.handleUiClick(() => this.rotateSelection(-ROTATE_STEP_DEGREES)),
       onRotateRight: () => this.handleUiClick(() => this.rotateSelection(ROTATE_STEP_DEGREES)),
       onUndo: () => this.handleUiClick(() => this.undoLastMove()),
+    }, {
+      enableDiagnostics: GameApp.enableDiagnostics,
     });
     this.hud.node.parent = this.hudRoot;
     this.hud.setVisible(false);
@@ -1034,7 +1036,10 @@ export class GameApp extends Component {
 
       const wasCompleted = runtime.completed;
       const validHit = frameState.hit && frameState.colorMatched && frameState.intensityEnough;
-      runtime.charge = validHit ? Math.min(chargeTime, runtime.charge + dt) : 0;
+      const decayRate = frameState.hit ? 0.7 : 0.45;
+      runtime.charge = validHit
+        ? Math.min(chargeTime, runtime.charge + dt)
+        : Math.max(0, runtime.charge - dt * decayRate);
       runtime.completed = runtime.charge + 1e-4 >= chargeTime;
       runtime.bestIntensity = Math.max(frameState.bestIntensity, validHit ? runtime.bestIntensity : runtime.bestIntensity * 0.6);
       runtime.bestColor = frameState.bestColor;
@@ -1242,10 +1247,12 @@ export class GameApp extends Component {
   private createMirror(mirror: MirrorConfig, inventoryPosition: Vec2) {
     const node = this.createLayerNode(`Mirror:${mirror.id}`, this.opticRoot);
     const component = node.addComponent(MirrorObject);
+    const startsInInventory = Boolean(mirror.startsInInventory);
+    const startPosition = startsInInventory ? inventoryPosition.clone() : new Vec2(mirror.x, mirror.y);
     component.setup(
       {
         id: mirror.id,
-        position: inventoryPosition.clone(),
+        position: startPosition,
         angle: mirror.angle,
         length: mirror.length,
         reflectivity: mirror.reflectivity,
@@ -1255,17 +1262,23 @@ export class GameApp extends Component {
         rotatable: mirror.rotatable,
       },
     );
-    component.setInventoryState(true, inventoryPosition);
+    component.setMoveBounds(mirror.moveBounds);
+    component.setInventoryState(startsInInventory, inventoryPosition);
+    if (!startsInInventory) {
+      component.recordValidPosition();
+    }
     return component;
   }
 
   private createPrism(prism: PrismConfig, inventoryPosition: Vec2) {
     const node = this.createLayerNode(`Prism:${prism.id}`, this.opticRoot);
     const component = node.addComponent(PrismObject);
+    const startsInInventory = Boolean(prism.startsInInventory);
+    const startPosition = startsInInventory ? inventoryPosition.clone() : new Vec2(prism.x, prism.y);
     component.setup(
       {
         id: prism.id,
-        position: inventoryPosition.clone(),
+        position: startPosition,
         angle: prism.angle,
         size: prism.size,
         dispersion: prism.dispersion,
@@ -1275,7 +1288,11 @@ export class GameApp extends Component {
         rotatable: prism.rotatable,
       },
     );
-    component.setInventoryState(true, inventoryPosition);
+    component.setMoveBounds(prism.moveBounds);
+    component.setInventoryState(startsInInventory, inventoryPosition);
+    if (!startsInInventory) {
+      component.recordValidPosition();
+    }
     return component;
   }
 

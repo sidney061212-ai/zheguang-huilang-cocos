@@ -54,6 +54,7 @@ const mirror = (
   rotatable = true,
   length = 96,
   reflectivity = 0.92,
+  startsInInventory = false,
 ): MirrorConfig => ({
   id,
   position: point(x, y),
@@ -63,6 +64,7 @@ const mirror = (
   length,
   movable,
   rotatable,
+  startsInInventory,
   reflectivity,
 });
 
@@ -76,6 +78,7 @@ const prism = (
   size = 62,
   dispersionAngle = 12,
   throughput = 0.82,
+  startsInInventory = false,
 ): PrismConfig => ({
   id,
   position: point(x, y),
@@ -85,6 +88,7 @@ const prism = (
   size,
   movable,
   rotatable,
+  startsInInventory,
   dispersion: dispersionAngle,
   dispersionAngle,
   throughput,
@@ -130,12 +134,17 @@ export const levels: LevelConfig[] = [
     teachingGoal: '认识光源和目标',
     chargeTime: 0.5,
     sources: [source('source-1', 56, 420, 0, 'white', 1)],
-    mirrors: [mirror('mirror-1', 118, 246, 20, true, true, 96, 0.92)],
+    mirrors: [mirror('mirror-1', 118, 246, 20, true, true, 96, 0.92, true)],
     prisms: [],
     targets: [target('target-1', 192, 620, ['white'], 0.25, 0.5)],
     obstacles: [],
     rules: baseRules,
     recommendedSolution: '将镜子拖到中路（约 x=188,y=420）并旋转到约 45°，白光可折向上方目标。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 108, y: 396, angle: 35, inInventory: false },
+      ],
+    },
   },
   {
     id: '2',
@@ -146,12 +155,17 @@ export const levels: LevelConfig[] = [
     teachingGoal: '镜子可以改变光路',
     chargeTime: 0.25,
     sources: [source('source-1', 52, 218, 12, 'white', 1)],
-    mirrors: [mirror('mirror-1', 176, 306, 42, true, true, 96, 0.92)],
+    mirrors: [mirror('mirror-1', 176, 306, 42, true, true, 96, 0.92, true)],
     prisms: [],
     targets: [target('target-1', 332, 612, ['white'], 0.26, 0.25)],
     obstacles: [],
     rules: baseRules,
     recommendedSolution: '把镜子放在中下区域，角度约 45°，即可完成。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 192, y: 268, angle: 40, inInventory: false },
+      ],
+    },
   },
   {
     id: '3',
@@ -164,7 +178,7 @@ export const levels: LevelConfig[] = [
     sources: [source('source-1', 52, 356, 0, 'white', 1)],
     mirrors: [
       {
-        ...mirror('mirror-1', 184, 362, 20, true, true, 92, 0.92),
+        ...mirror('mirror-1', 184, 362, 20, true, true, 92, 0.92, false),
         moveBounds: { x: 146, y: 326, width: 78, height: 68 },
       },
     ],
@@ -173,6 +187,11 @@ export const levels: LevelConfig[] = [
     obstacles: [],
     rules: baseRules,
     recommendedSolution: '基本保持中路位置，将镜子旋到约 51°。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 182, y: 362, angle: 30, inInventory: false },
+      ],
+    },
   },
   {
     id: '4',
@@ -183,31 +202,41 @@ export const levels: LevelConfig[] = [
     teachingGoal: '同时调整位置和角度',
     chargeTime: 0.25,
     sources: [source('source-1', 54, 222, 10, 'white', 1)],
-    mirrors: [mirror('mirror-1', 134, 286, 8, true, true, 100, 0.92)],
+    mirrors: [mirror('mirror-1', 134, 286, 8, true, true, 100, 0.92, false)],
     prisms: [],
     targets: [target('target-1', 330, 632, ['white'], 0.22, 0.25)],
     obstacles: [],
     rules: baseRules,
     recommendedSolution: '先把镜子上移到中部，再旋转到约 47°。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 148, y: 260, angle: 35, inInventory: false },
+      ],
+    },
   },
   {
     id: '5',
     numericId: 5,
     name: '绕开遮挡',
     shortName: '遮挡',
-    hint: '直射会被障碍挡住，尝试让光线绕行。',
+    hint: '直射会被障碍挡住，尝试把光线抬高绕过去。',
     teachingGoal: '障碍会阻挡光线',
     chargeTime: 0.25,
     sources: [source('source-1', 52, 408, 0, 'white', 1)],
-    mirrors: [mirror('mirror-1', 122, 248, 50, true, true, 98, 0.92)],
+    mirrors: [mirror('mirror-1', 122, 248, 50, true, true, 98, 0.92, true)],
     prisms: [],
-    targets: [target('target-1', 334, 410, ['white'], 0.2, 0.25)],
+    targets: [target('target-1', 300, 648, ['white'], 0.2, 0.25)],
     obstacles: [obstacle('obstacle-1', 196, 408, 72, 204)],
     rules: {
       ...baseRules,
       maxBounces: 10,
     },
-    recommendedSolution: '镜子放在障碍下方，先折向上，再从障碍侧边绕行。',
+    recommendedSolution: '镜子贴近入射光，把光束抬高，从障碍上方绕向右上目标。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 72, y: 408, angle: 25, inInventory: false },
+      ],
+    },
   },
   {
     id: '6',
@@ -219,8 +248,8 @@ export const levels: LevelConfig[] = [
     chargeTime: 0.25,
     sources: [source('source-1', 52, 220, 10, 'white', 1)],
     mirrors: [
-      mirror('mirror-a', 118, 334, 38, true, true, 92, 0.92),
-      mirror('mirror-b', 264, 482, -24, true, true, 92, 0.92),
+      mirror('mirror-a', 98, 228, 10, true, true, 92, 0.92, false),
+      mirror('mirror-b', 264, 482, -24, true, true, 92, 0.92, true),
     ],
     prisms: [],
     targets: [target('target-1', 332, 626, ['white'], 0.18, 0.25)],
@@ -231,6 +260,12 @@ export const levels: LevelConfig[] = [
       maxRays: 44,
     },
     recommendedSolution: '镜子 A 先把光抬高，镜子 B 再折向右上目标。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-a', x: 98, y: 228, angle: 35, inInventory: false },
+        { id: 'mirror-b', x: 180, y: 360, angle: 60, inInventory: false },
+      ],
+    },
   },
   {
     id: '7',
@@ -242,7 +277,7 @@ export const levels: LevelConfig[] = [
     chargeTime: 0.25,
     sources: [source('source-1', 52, 430, 0, 'white', 1)],
     mirrors: [],
-    prisms: [prism('prism-1', 186, 430, -16, true, true, 64, 12, 0.82)],
+    prisms: [prism('prism-1', 132, 460, -120, true, true, 64, 12, 0.82, false)],
     targets: [target('target-red', 332, 304, ['red'], 0.16, 0.25)],
     obstacles: [],
     rules: {
@@ -250,7 +285,12 @@ export const levels: LevelConfig[] = [
       maxRays: 56,
       maxSplitDepth: 2,
     },
-    recommendedSolution: '棱镜放在中路，略向下旋转，红光会落到右下目标。',
+    recommendedSolution: '调整棱镜朝向，让红光扇面扫到右上目标。',
+    solution: {
+      prisms: [
+        { id: 'prism-1', x: 132, y: 460, angle: -175, inInventory: false },
+      ],
+    },
   },
   {
     id: '8',
@@ -261,8 +301,8 @@ export const levels: LevelConfig[] = [
     teachingGoal: '分光 + 颜色匹配 + 镜子调整',
     chargeTime: 0.25,
     sources: [source('source-1', 52, 420, 0, 'white', 1)],
-    mirrors: [mirror('mirror-1', 262, 472, 36, true, true, 92, 0.92)],
-    prisms: [prism('prism-1', 170, 420, -8, true, true, 64, 12, 0.82)],
+    mirrors: [mirror('mirror-1', 156, 434, -120, true, true, 92, 0.92, false)],
+    prisms: [prism('prism-1', 96, 410, -140, true, true, 64, 12, 0.82, false)],
     targets: [
       target('target-red', 332, 302, ['red'], 0.16, 0.25),
       target('target-blue', 332, 624, ['blue'], 0.16, 0.25),
@@ -275,5 +315,13 @@ export const levels: LevelConfig[] = [
       maxSplitDepth: 2,
     },
     recommendedSolution: '棱镜负责分光，镜子将蓝光抬高到右上目标，红光走右下。',
+    solution: {
+      mirrors: [
+        { id: 'mirror-1', x: 156, y: 434, angle: -160, inInventory: false },
+      ],
+      prisms: [
+        { id: 'prism-1', x: 80, y: 406, angle: -175, inInventory: false },
+      ],
+    },
   },
 ];

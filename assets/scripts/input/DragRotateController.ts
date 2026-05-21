@@ -1,4 +1,4 @@
-import { EventTouch, Node, Rect, UITransform, Vec2, Vec3 } from 'cc';
+import { Color, EventTouch, Graphics, Node, Rect, UITransform, Vec2, Vec3 } from 'cc';
 import { AudioManager } from '../audio/AudioManager';
 import { SoundKeys } from '../audio/SoundKeys';
 import { DESIGN_HEIGHT, DESIGN_WIDTH } from '../core/Constants';
@@ -18,8 +18,12 @@ export class DragRotateController {
   private selection: DraggableOpticObject | null = null;
   private session: DragSession | null = null;
   private readonly rootTransform: UITransform;
+  private readonly moveBoundsHintNode: Node;
+  private readonly moveBoundsHintGraphics: Graphics;
   private lastRotateStep = NaN;
   private readonly dragStartThreshold = 4;
+  private readonly dragMoveAudioCooldownMs = 96;
+  private lastDragMoveAudioAt = 0;
 
   constructor(
     private readonly root: Node,
@@ -36,6 +40,13 @@ export class DragRotateController {
       designWidth: DESIGN_WIDTH,
       designHeight: DESIGN_HEIGHT,
     });
+    this.moveBoundsHintNode = new Node('MoveBoundsHint');
+    this.moveBoundsHintNode.layer = this.root.layer;
+    this.moveBoundsHintNode.parent = this.root;
+    this.moveBoundsHintNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
+    this.moveBoundsHintNode.setPosition(0, 0, 0);
+    this.moveBoundsHintGraphics = this.moveBoundsHintNode.addComponent(Graphics);
+    this.moveBoundsHintNode.active = false;
     this.root.on(Node.EventType.TOUCH_MOVE, this.onTouchMove, this);
     this.root.on(Node.EventType.TOUCH_END, this.onTouchEnd, this);
     this.root.on(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
@@ -51,6 +62,7 @@ export class DragRotateController {
     if (this.selection === object) {
       return;
     }
+    this.hideMoveBoundsHint();
     this.selection?.setSelected(false);
     this.selection?.setInteractionMode('idle');
     this.selection = object;
@@ -94,6 +106,7 @@ export class DragRotateController {
     this.root.off(Node.EventType.TOUCH_END, this.onTouchEnd, this);
     this.root.off(Node.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
     this.blankTapNode.off(Node.EventType.TOUCH_END, this.onBlankTap, this);
+    this.moveBoundsHintNode.destroy();
     PlayfieldTransform.setRootTransform(null);
   }
 
@@ -180,6 +193,7 @@ export class DragRotateController {
     const changed = this.hasSessionChanged(session);
     this.callbacks.onInteractionCommitted?.(session.object, endedMode, changed);
     this.session = null;
+    this.hideMoveBoundsHint();
     this.callbacks.onWorldChanged();
   }
 
@@ -194,17 +208,21 @@ export class DragRotateController {
     const delta = currentTouch.clone().subtract(session.pressStartPlayfieldPos);
     const unclamped = session.objectStartPos.clone().add(delta);
     const radius = session.object.getTouchRadius();
+    const moveBounds = session.object.getMoveBounds();
 
     if (session.startedFromInventory) {
       const inCanvas = this.clampToCanvas(unclamped, radius);
-      session.object.applyDesignPosition(inCanvas);
-      const insidePlayfield = PlayfieldTransform.isInsidePlayfield(inCanvas, radius);
-      const blocked = insidePlayfield && this.isBlocked(inCanvas, radius);
+      const bounded = moveBounds ? this.clampToMoveBounds(inCanvas, moveBounds) : inCanvas;
+      const snapped = this.softSnapIntoPlayfield(bounded, radius);
+      session.object.applyDesignPosition(snapped);
+      const insidePlayfield = PlayfieldTransform.isInsidePlayfield(snapped, radius);
+      const blocked = insidePlayfield && this.isBlocked(snapped, radius);
       session.isCurrentPlacementValid = insidePlayfield && !blocked;
       session.object.setInteractionMode(session.isCurrentPlacementValid ? 'dragging' : 'invalid');
     } else {
-      const clamped = PlayfieldTransform.clampToPlayfield(unclamped, radius);
-      const outOfBounds = clamped.x !== unclamped.x || clamped.y !== unclamped.y;
+      const bounded = moveBounds ? this.clampToMoveBounds(unclamped, moveBounds) : unclamped;
+      const clamped = PlayfieldTransform.clampToPlayfield(bounded, radius);
+      const outOfBounds = clamped.x !== bounded.x || clamped.y !== bounded.y;
       const blocked = this.isBlocked(clamped, radius);
       session.isCurrentPlacementValid = !outOfBounds && !blocked;
       session.object.applyDesignPosition(clamped);
@@ -215,8 +233,8 @@ export class DragRotateController {
       }
     }
     session.hasChanged = this.hasSessionChanged(session);
-
-    this.audio.play(SoundKeys.DragMove);
+    this.refreshMoveBoundsHint(session.object);
+    this.playDragMoveAudio();
     this.callbacks.onWorldChanged();
   }
 
@@ -259,6 +277,7 @@ export class DragRotateController {
       object.recordValidPosition();
       object.setInventoryState(false);
       object.setInteractionMode('idle');
+      object.playDropFeedback();
       this.audio.play(SoundKeys.ObjectDrop);
       this.callbacks.onSelectionChanged(object);
       return;
@@ -281,6 +300,7 @@ export class DragRotateController {
 
     object.recordValidPosition();
     object.setInteractionMode('idle');
+    object.playDropFeedback();
     this.audio.play(SoundKeys.ObjectDrop);
   }
 
@@ -302,6 +322,25 @@ export class DragRotateController {
     );
   }
 
+  private clampToMoveBounds(position: Vec2, moveBounds: { x: number; y: number; width: number; height: number }) {
+    return new Vec2(
+      clamp(position.x, moveBounds.x, moveBounds.x + moveBounds.width),
+      clamp(position.y, moveBounds.y, moveBounds.y + moveBounds.height),
+    );
+  }
+
+  private softSnapIntoPlayfield(position: Vec2, radius: number) {
+    const snapZoneY = this.playAreaRect.y - 26;
+    if (position.y < snapZoneY) {
+      return position.clone();
+    }
+    const clamped = PlayfieldTransform.clampToPlayfield(position, radius);
+    return new Vec2(
+      position.x + (clamped.x - position.x) * 0.38,
+      position.y + (clamped.y - position.y) * 0.38,
+    );
+  }
+
   private isBlocked(position: Vec2, radius: number) {
     return this.blockedZones.some((zone) => {
       const left = zone.x - radius;
@@ -310,6 +349,38 @@ export class DragRotateController {
       const top = zone.y + zone.height + radius;
       return position.x >= left && position.x <= right && position.y >= bottom && position.y <= top;
     });
+  }
+
+  private playDragMoveAudio() {
+    const now = Date.now();
+    if (now - this.lastDragMoveAudioAt < this.dragMoveAudioCooldownMs) {
+      return;
+    }
+    this.lastDragMoveAudioAt = now;
+    this.audio.play(SoundKeys.DragMove);
+  }
+
+  private refreshMoveBoundsHint(object: DraggableOpticObject) {
+    const moveBounds = object.getMoveBounds();
+    if (!moveBounds) {
+      this.hideMoveBoundsHint();
+      return;
+    }
+    this.moveBoundsHintNode.active = true;
+    this.moveBoundsHintGraphics.clear();
+    this.moveBoundsHintGraphics.fillColor = new Color(148, 204, 255, 24);
+    this.moveBoundsHintGraphics.strokeColor = new Color(148, 204, 255, 118);
+    this.moveBoundsHintGraphics.lineWidth = 2;
+    const uiOrigin = PlayfieldTransform.playfieldToUi(new Vec2(moveBounds.x, moveBounds.y));
+    this.moveBoundsHintGraphics.roundRect(uiOrigin.x, uiOrigin.y, moveBounds.width, moveBounds.height, 12);
+    this.moveBoundsHintGraphics.fill();
+    this.moveBoundsHintGraphics.roundRect(uiOrigin.x, uiOrigin.y, moveBounds.width, moveBounds.height, 12);
+    this.moveBoundsHintGraphics.stroke();
+  }
+
+  private hideMoveBoundsHint() {
+    this.moveBoundsHintGraphics.clear();
+    this.moveBoundsHintNode.active = false;
   }
 
   private normalizeAngleDelta(delta: number) {

@@ -116,7 +116,9 @@ export class TargetObject extends Component {
     const graphics = this.node.getComponent(Graphics) ?? this.node.addComponent(Graphics);
     graphics.clear();
     const accepted = this.snapshot.acceptedColors[0] ?? 'white';
-    const ring = colorToDisplayColor(this.visualState.reason === 'wrong_color' ? 'red' : accepted);
+    const acceptedColor = colorToDisplayColor(accepted);
+    const wrongColor = new Color(255, 166, 112, 255);
+    const ring = this.visualState.reason === 'wrong_color' ? wrongColor : acceptedColor;
     const completed = this.visualState.completed;
     const hit = this.visualState.hit;
     const colorMatched = this.visualState.colorMatched;
@@ -160,5 +162,19 @@ export class TargetObject extends Component {
     graphics.fillColor = new Color(ring.r, ring.g, ring.b, coreAlpha);
     graphics.circle(0, 0, coreRadius);
     graphics.fill();
+
+    if (!completed && this.visualState.chargeRatio > 0.01) {
+      graphics.lineWidth = 4;
+      graphics.strokeColor = new Color(acceptedColor.r, acceptedColor.g, acceptedColor.b, 230);
+      graphics.arc(0, 0, this.snapshot.radius + 6, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * this.visualState.chargeRatio, false);
+      graphics.stroke();
+    }
+
+    if (!completed && hit && colorMatched && !intensityEnough) {
+      graphics.lineWidth = 2;
+      graphics.strokeColor = new Color(acceptedColor.r, acceptedColor.g, acceptedColor.b, 118);
+      graphics.circle(0, 0, this.snapshot.radius - 6);
+      graphics.stroke();
+    }
   }
 }
